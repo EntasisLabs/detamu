@@ -1,0 +1,4 @@
+6,3,36,2,6,"score@1-6@/tmp/detamu-acc-parity/scorer.ts","/tmp/detamu-acc-parity/scorer.ts","score","score ( value , enabled )",1,6
+10,3,38,2,10,"score@1-10@/tmp/detamu-acc-parity/scorer.rs","/tmp/detamu-acc-parity/scorer.rs","score","score value : u32 , enabled : bool",1,10
+8,3,33,2,9,"Calculator::Score@5-13@/tmp/detamu-acc-parity/Calculator.cs","/tmp/detamu-acc-parity/Calculator.cs","Calculator::Score","Calculator::Score( int value , bool enabled)",5,13
+6,3,26,2,6,"score@1-6@/tmp/detamu-acc-parity/scorer.py","/tmp/detamu-acc-parity/scorer.py","score","score( value , enabled )",1,6

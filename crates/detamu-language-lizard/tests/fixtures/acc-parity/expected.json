@@ -1,0 +1,50 @@
+[
+  {
+    "path": "Calculator.cs",
+    "language": "csharp",
+    "id": "node_11b451953ae3a83e6a851d595eda1f51",
+    "label": "Calculator::Score",
+    "kind": "method",
+    "line_start": 5,
+    "line_end": 13,
+    "nloc": 8,
+    "complexity": 3,
+    "parameters": 2
+  },
+  {
+    "path": "scorer.py",
+    "language": "python",
+    "id": "node_74432c1b3da8e5afe4de63d36eddd918",
+    "label": "score",
+    "kind": "function",
+    "line_start": 1,
+    "line_end": 6,
+    "nloc": 6,
+    "complexity": 3,
+    "parameters": 2
+  },
+  {
+    "path": "scorer.ts",
+    "language": "typescript",
+    "id": "node_5953cc61223e61da996fa4395252c5d5",
+    "label": "score",
+    "kind": "function",
+    "line_start": 1,
+    "line_end": 6,
+    "nloc": 6,
+    "complexity": 3,
+    "parameters": 2
+  },
+  {
+    "path": "scorer.rs",
+    "language": "rust",
+    "id": "node_8188e6d9162545174b3d60e144b1afe8",
+    "label": "score",
+    "kind": "unknown",
+    "line_start": 1,
+    "line_end": 10,
+    "nloc": 10,
+    "complexity": 3,
+    "parameters": 2
+  }
+]

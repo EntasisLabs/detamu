@@ -409,6 +409,7 @@ fn revision(input: &AnalysisInput) -> Result<RevisionId, AnalyzerError> {
 #[cfg(test)]
 mod tests {
     use detamu_core::{SnapshotId, SnapshotVersion, WorldId};
+    use serde_json::Value;
 
     use super::*;
 
@@ -514,5 +515,131 @@ mod tests {
         assert_eq!(batch.entities.len(), 1);
         assert_eq!(batch.entities[0].entity.label, "greet");
         assert!((batch.entities[0].measurements[1].value - 3.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn preserves_acc_metrics_and_identity_across_languages() {
+        let temporary = Path::new("/tmp/detamu-acc-parity");
+        let expected: Value =
+            serde_json::from_slice(include_bytes!("../tests/fixtures/acc-parity/expected.json"))
+                .expect("parse expected observations");
+        let expected = expected.as_array().expect("expected observation array");
+        let artifacts = expected
+            .iter()
+            .map(|item| {
+                let mut attributes = BTreeMap::new();
+                attributes.insert(
+                    "language".to_owned(),
+                    item.get("language").expect("fixture language").clone(),
+                );
+                Artifact {
+                    path: item
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .expect("fixture path")
+                        .to_owned(),
+                    content_id: "fixture".to_owned(),
+                    media_type: None,
+                    attributes,
+                }
+            })
+            .collect::<Vec<_>>();
+        let input = AnalysisInput {
+            snapshot: SnapshotId::new(
+                WorldId::new("code.repository:acc-parity"),
+                SnapshotVersion::new("fixture"),
+            ),
+            sources: Vec::new(),
+            changed_entities: None,
+        };
+        let batch = parse_csv(
+            &input,
+            temporary,
+            &artifacts,
+            include_bytes!("../tests/fixtures/acc-parity/lizard-1.23.csv"),
+        )
+        .expect("parse ACC parity corpus");
+
+        assert_eq!(batch.entities.len(), expected.len());
+        assert_eq!(batch.relations.len(), expected.len());
+        for item in expected {
+            assert_expected_observation(&batch, item);
+        }
+    }
+
+    fn assert_expected_observation(batch: &ObservationBatch, expected: &Value) {
+        let path = expected
+            .get("path")
+            .and_then(Value::as_str)
+            .expect("expected path");
+        let observation = batch
+            .entities
+            .iter()
+            .find(|observation| {
+                observation
+                    .attributes
+                    .get("file_path")
+                    .and_then(Value::as_str)
+                    == Some(path)
+            })
+            .expect("observation for fixture path");
+        assert_eq!(
+            observation.entity.id.as_str(),
+            expected
+                .get("id")
+                .and_then(Value::as_str)
+                .expect("expected id")
+        );
+        assert_eq!(
+            observation.entity.label,
+            expected
+                .get("label")
+                .and_then(Value::as_str)
+                .expect("expected label")
+        );
+        assert_eq!(
+            observation.entity.kind,
+            expected
+                .get("kind")
+                .and_then(Value::as_str)
+                .expect("expected kind")
+        );
+        assert_eq!(
+            observation
+                .attributes
+                .get("line_start")
+                .and_then(Value::as_u64),
+            expected.get("line_start").and_then(Value::as_u64)
+        );
+        assert_eq!(
+            observation
+                .attributes
+                .get("lizard.line_end")
+                .and_then(Value::as_u64),
+            expected.get("line_end").and_then(Value::as_u64)
+        );
+        for (name, expected_name) in [
+            ("code.lines_of_code", "nloc"),
+            ("code.cyclomatic_complexity", "complexity"),
+            ("code.parameters", "parameters"),
+        ] {
+            let measurement = observation
+                .measurements
+                .iter()
+                .find(|measurement| measurement.name == name)
+                .expect("expected measurement");
+            let expected_value = expected
+                .get(expected_name)
+                .and_then(Value::as_f64)
+                .expect("expected metric");
+            assert!((measurement.value - expected_value).abs() < f64::EPSILON);
+            assert_eq!(
+                measurement
+                    .evidence
+                    .as_ref()
+                    .map(|evidence| evidence.observer.as_str()),
+                Some("lizard")
+            );
+        }
     }
 }

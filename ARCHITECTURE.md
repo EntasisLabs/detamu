@@ -139,7 +139,9 @@ Detamu does not reimplement every language frontend. Code analysis is layered:
 - `detamu-language-lizard` invokes an optional installed Lizard binary against a
   temporary materialization of immutable artifacts. Its CSV output supplies broad
   baseline functions, LOC, complexity, and parameter evidence with ACC-compatible
-  identities. Missing Lizard never prevents other analyzers from completing.
+  identities. A frozen Lizard 1.23 corpus verifies those contracts across C#,
+  Python, TypeScript, and Rust without requiring the executable in CI. Missing
+  Lizard never prevents other analyzers from completing.
 - Tree-sitter language specifications provide fast, in-process structure and
   deterministic syntax observations.
 - `detamu-language-lsp` provides a generic stdio process lifecycle, initialize /
