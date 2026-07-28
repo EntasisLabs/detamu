@@ -4,6 +4,8 @@
 //! state are metadata only. File inventory is read from the commit tree, so it
 //! remains stable even when the working tree is dirty.
 
+mod history;
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -178,7 +180,11 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
             name: "git.repository.inventory".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
             model: ModelId::new(CODE_MODEL_ID),
-            capabilities: vec!["tracked_files".to_owned(), "language_detection".to_owned()],
+            capabilities: vec![
+                "tracked_files".to_owned(),
+                "language_detection".to_owned(),
+                "git_history".to_owned(),
+            ],
         }
     }
 
@@ -205,6 +211,9 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
         let files = GitRepositorySource::tracked_files(&snapshot)
             .await
             .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
+        let histories = GitRepositorySource::file_histories(&snapshot)
+            .await
+            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
         let revision = snapshot.revision();
         let mut batch = ObservationBatch::empty(input.snapshot.clone());
         batch.coverage = AnalysisCoverage::Partial;
@@ -224,6 +233,7 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
                     &file.mode,
                     file.size,
                     &file.language,
+                    histories.get(&file.path),
                 )
             })
             .collect();

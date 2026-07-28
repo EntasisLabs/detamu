@@ -47,6 +47,40 @@ fn fixture() -> tempfile::TempDir {
     directory
 }
 
+fn commit_at(root: &Path, message: &str, date: &str, name: &str, email: &str) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["commit", "-q", "-m", message])
+        .env("GIT_AUTHOR_NAME", name)
+        .env("GIT_AUTHOR_EMAIL", email)
+        .env("GIT_AUTHOR_DATE", date)
+        .env("GIT_COMMITTER_NAME", name)
+        .env("GIT_COMMITTER_EMAIL", email)
+        .env("GIT_COMMITTER_DATE", date)
+        .output()
+        .expect("commit fixture");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn head(root: &Path) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .expect("resolve fixture head");
+    assert!(output.status.success());
+    String::from_utf8(output.stdout)
+        .expect("UTF-8 OID")
+        .trim()
+        .to_owned()
+}
+
 #[tokio::test]
 async fn discovery_is_rooted_at_an_immutable_commit() {
     let directory = fixture();
@@ -111,5 +145,102 @@ async fn source_and_analyzer_produce_a_partial_code_snapshot() {
             .iter()
             .all(|entity| entity.entity.kind == "file")
     );
+    assert!(batch.entities.iter().all(|entity| {
+        entity
+            .measurements
+            .iter()
+            .any(|measurement| measurement.name == "git.total_commits")
+    }));
     assert!(batch.relations.is_empty());
+}
+
+#[tokio::test]
+async fn history_follows_renames_and_stops_at_the_requested_snapshot() {
+    let directory = tempfile::tempdir().expect("temporary repository");
+    let root = directory.path();
+    run_git(root, &["init", "-q"]);
+    run_git(root, &["checkout", "-q", "-b", "main"]);
+    fs::create_dir_all(root.join("src")).expect("create source directory");
+
+    fs::write(root.join("src/old.rs"), "pub fn value() -> u8 { 1 }\n").expect("first");
+    run_git(root, &["add", "."]);
+    commit_at(
+        root,
+        "first",
+        "2024-01-01T00:00:00Z",
+        "Ada",
+        "ada@example.test",
+    );
+
+    fs::write(root.join("src/old.rs"), "pub fn value() -> u8 { 2 }\n").expect("second");
+    run_git(root, &["add", "."]);
+    commit_at(
+        root,
+        "second",
+        "2024-01-11T00:00:00Z",
+        "Grace",
+        "grace@example.test",
+    );
+
+    fs::write(root.join("src/old.rs"), "pub fn value() -> u8 { 3 }\n").expect("third");
+    run_git(root, &["add", "."]);
+    commit_at(
+        root,
+        "third",
+        "2024-01-21T00:00:00Z",
+        "Ada",
+        "ada@example.test",
+    );
+
+    run_git(root, &["mv", "src/old.rs", "src/current.rs"]);
+    commit_at(
+        root,
+        "rename",
+        "2024-02-10T00:00:00Z",
+        "Grace",
+        "grace@example.test",
+    );
+    let renamed_snapshot = head(root);
+
+    fs::write(root.join("src/current.rs"), "pub fn value() -> u8 { 4 }\n").expect("fifth");
+    run_git(root, &["add", "."]);
+    commit_at(
+        root,
+        "fifth",
+        "2024-05-20T00:00:00Z",
+        "Ada",
+        "ada@example.test",
+    );
+
+    let old = GitRepositorySource::inspect(root, Some(&renamed_snapshot))
+        .await
+        .expect("old snapshot");
+    let old_history = GitRepositorySource::file_histories(&old)
+        .await
+        .expect("old history");
+    let old_file = old_history
+        .get("src/current.rs")
+        .expect("renamed file history");
+    assert_eq!(old_file.total_commits, 4);
+    assert_eq!(old_file.contributors, 2);
+    assert_eq!(old_file.recent_commits, 4);
+    assert_eq!(old_file.recent_frequency.as_str(), "medium");
+    assert!((old_file.average_days_between_changes - (40.0 / 3.0)).abs() < 0.000_001);
+
+    let current = GitRepositorySource::inspect(root, None)
+        .await
+        .expect("current snapshot");
+    let current_history = GitRepositorySource::file_histories(&current)
+        .await
+        .expect("current history");
+    let current_file = current_history
+        .get("src/current.rs")
+        .expect("current file history");
+    assert_eq!(current_file.total_commits, 5);
+    assert_eq!(current_file.contributors, 2);
+    assert_eq!(current_file.recent_commits, 1);
+    assert_eq!(current_file.recent_frequency.as_str(), "low");
+    assert!((current_file.average_days_between_changes - 35.0).abs() < 0.000_001);
+    assert!(current_file.created_at.starts_with("2024-01-01T"));
+    assert!(current_file.last_modified_at.starts_with("2024-05-20T"));
 }

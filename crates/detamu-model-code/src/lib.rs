@@ -163,6 +163,7 @@ pub fn file_observation(
     mode: &str,
     size: Option<u64>,
     language: &LanguageId,
+    history: Option<&FileHistory>,
 ) -> EntityObservation {
     let mut attributes = BTreeMap::new();
     attributes.insert("file_path".to_owned(), json!(path));
@@ -170,6 +171,29 @@ pub fn file_observation(
     attributes.insert("git.blob_oid".to_owned(), json!(blob_oid));
     attributes.insert("git.mode".to_owned(), json!(mode));
     attributes.insert("file.size_bytes".to_owned(), json!(size));
+
+    let mut measurements = Vec::new();
+    if let Some(history) = history {
+        attributes.insert("git.created_at".to_owned(), json!(history.created_at));
+        attributes.insert(
+            "git.last_modified_at".to_owned(),
+            json!(history.last_modified_at),
+        );
+        attributes.insert(
+            "git.recent_frequency".to_owned(),
+            json!(history.recent_frequency.as_str()),
+        );
+        measurements.extend([
+            measurement("git.total_commits", history.total_commits),
+            measurement("git.contributors", history.contributors),
+            measurement("git.recent_commits", history.recent_commits),
+            Measurement {
+                name: "git.average_days_between_changes".to_owned(),
+                value: history.average_days_between_changes,
+                unit: Some("days".to_owned()),
+            },
+        ]);
+    }
 
     EntityObservation {
         snapshot: revision.snapshot(),
@@ -180,7 +204,7 @@ pub fn file_observation(
             label: path.to_owned(),
         },
         attributes,
-        measurements: Vec::new(),
+        measurements,
         scores: Vec::new(),
     }
 }
@@ -205,6 +229,43 @@ pub struct NodeMetrics {
     pub git_average_days_between_changes: f64,
     pub test_line_coverage: f64,
     pub test_branch_coverage: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecentFrequency {
+    Low,
+    Medium,
+    High,
+}
+
+impl RecentFrequency {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+
+    pub const fn from_recent_commits(commits: u32) -> Self {
+        match commits {
+            0..=2 => Self::Low,
+            3..=9 => Self::Medium,
+            _ => Self::High,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FileHistory {
+    pub created_at: String,
+    pub last_modified_at: String,
+    pub total_commits: u32,
+    pub contributors: u32,
+    pub average_days_between_changes: f64,
+    pub recent_commits: u32,
+    pub recent_frequency: RecentFrequency,
 }
 
 impl NodeMetrics {

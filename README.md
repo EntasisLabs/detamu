@@ -21,13 +21,15 @@ The current workspace establishes:
   ACC metrics, and AVEC Code;
 - deterministic Git repository discovery, immutable commit snapshots, and
   tracked-file language inventory;
+- rename-aware bulk Git history with contributor, churn, timing, and recent
+  frequency evidence anchored to each snapshot;
 - generic storage with an in-memory behavioral reference;
 - native SurrealDB and persistent SurrealKV storage with transactional bulk
   snapshot replacement;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is Git history enrichment and the first symbol analyzer,
-followed by ACC golden fixtures and deeper language analysis.
+The next milestone is the first symbol analyzer, followed by ACC graph golden
+fixtures and deeper language analysis.
 
 ## Workspace
 

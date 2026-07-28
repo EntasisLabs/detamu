@@ -77,10 +77,18 @@ such as branches, but snapshot identity must use an immutable source version.
 - enumerates supported tracked files from the exact commit tree in deterministic
   path order;
 - emits file entities with language, blob OID, Git mode, and byte size.
+- extracts all per-file history in one chronological, rename-aware traversal;
+- records created/modified time, commits, contributors, average days between
+  changes, recent commits, and ACC-compatible low/medium/high frequency.
 
 Inventory never reads the mutable filesystem. Later content analyzers must read
 the corresponding Git blobs or otherwise prove that their input matches the
 requested commit.
+
+Recent activity uses ACC's 90-day and 0–2/3–9/10+ thresholds, but the window is
+anchored to the snapshot commit's author time rather than wall-clock time. This
+makes observations reproducible. Average change intervals use consecutive
+observed commit times; negative author-date movement is clamped to zero.
 
 ## Observation and scoring flow
 
@@ -128,10 +136,9 @@ graph.
 
 1. Keep the generic seams stable.
 2. Port ACC behavior into `detamu-model-code`.
-3. Enrich Git file observations with ACC-compatible history metrics.
-4. Build symbol and dependency analyzers against the model contracts.
-5. Verify formulas and graph output with C# ACC golden fixtures.
-6. Prove the architecture with a second pack for GitHub issues and pull requests.
+3. Build symbol and dependency analyzers against the model contracts.
+4. Verify formulas and graph output with C# ACC golden fixtures.
+5. Prove the architecture with a second pack for GitHub issues and pull requests.
 
 Cross-domain links such as `ticket -> implemented_by -> pull request -> modifies
 -> code symbol` belong to model packs and reconciliation rules, not special cases
