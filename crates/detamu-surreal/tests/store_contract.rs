@@ -4,7 +4,7 @@ use detamu_model_code::{
     AvecCodeScorer, CodeSymbol, DependencyType, GitOid, LanguageId, NodeKind, NodeMetrics,
     RepositoryId, RevisionId, SymbolId, dependency_observation, symbol_observation,
 };
-use detamu_store::{DetamuStore, InMemoryStore, RelationDirection};
+use detamu_store::{DetamuStore, InMemoryStore, RelationDirection, SnapshotRecord};
 use detamu_surreal::SurrealStore;
 use tokio::time::{Duration, sleep};
 
@@ -66,6 +66,28 @@ async fn assert_contract(store: &dyn DetamuStore) {
     let target = batch.entities[1].entity.id.clone();
     store.ingest(batch.clone()).await.expect("ingest fixture");
     assert_eq!(
+        store.snapshot(&snapshot).await.expect("snapshot lookup"),
+        Some(SnapshotRecord::from(&batch))
+    );
+    assert_eq!(
+        store
+            .snapshots(Some(&snapshot.world))
+            .await
+            .expect("snapshot enumeration"),
+        vec![SnapshotRecord::from(&batch)]
+    );
+    assert_eq!(
+        store.entities(&snapshot).await.expect("entity enumeration"),
+        batch.entities
+    );
+    assert_eq!(
+        store
+            .snapshot_relations(&snapshot)
+            .await
+            .expect("relation enumeration"),
+        batch.relations
+    );
+    assert_eq!(
         store
             .entity(&snapshot, &source)
             .await
@@ -98,6 +120,15 @@ async fn assert_contract(store: &dyn DetamuStore) {
             .await
             .expect("stale lookup"),
         None
+    );
+    assert_eq!(
+        store
+            .snapshot(&snapshot)
+            .await
+            .expect("replacement snapshot")
+            .expect("snapshot record")
+            .entity_count,
+        1
     );
 }
 

@@ -82,6 +82,9 @@ async fn main() -> ExitCode {
             };
             index_repository(&repository, &path, &options).await
         }
+        Some(command @ ("snapshots" | "inspect" | "find" | "impact" | "diff" | "gaps")) => {
+            query_commands::run(command, arguments).await
+        }
         Some("help" | "--help" | "-h") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -102,6 +105,12 @@ fn print_help() {
            doctor    Report installed engine capabilities\n  \
            init      Initialize a native SurrealKV database\n  \
            index     Index a Git repository snapshot with optional coverage evidence\n  \
+           snapshots List persisted immutable snapshots\n  \
+           inspect   Inspect one entity and its relations\n  \
+           find      Find code entities by path, name, kind, language, or line\n  \
+           impact    Traverse reverse code dependencies\n  \
+           diff      Compare two snapshots of the same world\n  \
+           gaps      Explain missing AVEC evidence and scores\n  \
            version   Print the engine version\n  \
            help      Print this help"
     );
@@ -143,7 +152,7 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
         .build();
     let request = SourceRequest {
         locator: repository.to_owned(),
-        version: None,
+        version: options.revision.clone(),
     };
     match detamu.index_source(&GitRepositorySource, &request).await {
         Ok(report) => {
@@ -173,16 +182,23 @@ struct IndexOptions {
     namespace: String,
     database: String,
     coverage: Vec<String>,
+    revision: Option<String>,
 }
 
 impl IndexOptions {
     fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut positional = Vec::new();
         let mut coverage = Vec::new();
+        let mut revision = None;
         let mut arguments = arguments.into_iter();
         while let Some(argument) = arguments.next() {
             if argument == "--coverage" {
                 coverage.push(arguments.next().ok_or_else(index_usage)?);
+            } else if argument == "--revision" {
+                if revision.is_some() {
+                    return Err("--revision may only be supplied once".to_owned());
+                }
+                revision = Some(arguments.next().ok_or_else(index_usage)?);
             } else if argument.starts_with('-') {
                 return Err(format!(
                     "unknown index option: {argument}\n{}",
@@ -205,13 +221,14 @@ impl IndexOptions {
                 .cloned()
                 .unwrap_or_else(|| "detamu".to_owned()),
             coverage,
+            revision,
         })
     }
 }
 
 fn index_usage() -> String {
     "usage: detamu index <REPOSITORY> <DATABASE_PATH> [NAMESPACE] [DATABASE] \
-     [--coverage <LCOV_OR_COBERTURA_PATH>]..."
+     [--revision <COMMITISH>] [--coverage <LCOV_OR_COBERTURA_PATH>]..."
         .to_owned()
 }
 
@@ -234,6 +251,15 @@ mod tests {
         assert_eq!(options.namespace, "workspace");
         assert_eq!(options.database, "analysis");
         assert_eq!(options.coverage, ["lcov.info", "coverage.xml"]);
+        assert_eq!(options.revision, None);
+    }
+
+    #[test]
+    fn parses_an_explicit_immutable_revision() {
+        let options = IndexOptions::parse(["--revision".to_owned(), "abc123".to_owned()])
+            .expect("parse revision");
+
+        assert_eq!(options.revision.as_deref(), Some("abc123"));
     }
 
     #[test]
@@ -243,3 +269,4 @@ mod tests {
         assert!(error.starts_with("usage: detamu index"));
     }
 }
+mod query_commands;

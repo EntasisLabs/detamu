@@ -13,8 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 detamu-code-coverage.workspace = true
+detamu-core.workspace = true
 detamu-model.workspace = true
 detamu-model-code.workspace = true
+detamu-query.workspace = true
+detamu-query-code.workspace = true
 detamu-language-lizard.workspace = true
 detamu-language-rust.workspace = true
 detamu-language-rust-analyzer.workspace = true

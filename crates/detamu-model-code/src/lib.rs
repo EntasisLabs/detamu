@@ -53,6 +53,19 @@ macro_rules! string_id {
 }
 
 pub const CODE_MODEL_ID: &str = "code";
+pub const AVEC_REQUIRED_MEASUREMENTS: [&str; 10] = [
+    "code.lines_of_code",
+    "code.cyclomatic_complexity",
+    "code.parameters",
+    "graph.incoming_edges",
+    "graph.outgoing_edges",
+    "git.total_commits",
+    "git.contributors",
+    "git.average_days_between_changes",
+    "test.line_coverage",
+    "test.branch_coverage",
+];
+pub const AVEC_SCORE_DIMENSIONS: [&str; 4] = ["stability", "logic", "friction", "autonomy"];
 
 string_id!(RepositoryId);
 string_id!(GitOid);

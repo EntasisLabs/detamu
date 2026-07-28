@@ -11,6 +11,8 @@ members = [
     "crates/detamu-language-tree-sitter",
     "crates/detamu-model",
     "crates/detamu-model-code",
+    "crates/detamu-query",
+    "crates/detamu-query-code",
     "crates/detamu-sdk",
     "crates/detamu-source-git",
     "crates/detamu-store",
@@ -37,6 +39,8 @@ detamu-language-rust-analyzer = { path = "crates/detamu-language-rust-analyzer" 
 detamu-language-tree-sitter = { path = "crates/detamu-language-tree-sitter" }
 detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
+detamu-query = { path = "crates/detamu-query" }
+detamu-query-code = { path = "crates/detamu-query-code" }
 detamu-source-git = { path = "crates/detamu-source-git" }
 detamu-store = { path = "crates/detamu-store" }
 serde = { version = "1", features = ["derive"] }

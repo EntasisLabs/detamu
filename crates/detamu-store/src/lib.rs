@@ -9,15 +9,45 @@ use std::{
 };
 
 use async_trait::async_trait;
-use detamu_core::{EntityId, EntityObservation, ObservationBatch, RelationObservation, SnapshotId};
+use detamu_core::{
+    AnalysisCoverage, AnalysisDiagnostic, CommitMode, EntityId, EntityObservation,
+    ObservationBatch, ObserverProvenance, RelationObservation, SnapshotId, WorldId,
+};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::RwLock;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RelationDirection {
     Incoming,
     Outgoing,
     Both,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotRecord {
+    pub snapshot: SnapshotId,
+    pub commit_mode: CommitMode,
+    pub coverage: AnalysisCoverage,
+    pub provenance: Vec<ObserverProvenance>,
+    pub diagnostics: Vec<AnalysisDiagnostic>,
+    pub entity_count: usize,
+    pub relation_count: usize,
+}
+
+impl From<&ObservationBatch> for SnapshotRecord {
+    fn from(batch: &ObservationBatch) -> Self {
+        Self {
+            snapshot: batch.snapshot.clone(),
+            commit_mode: batch.commit_mode,
+            coverage: batch.coverage,
+            provenance: batch.provenance.clone(),
+            diagnostics: batch.diagnostics.clone(),
+            entity_count: batch.entities.len(),
+            relation_count: batch.relations.len(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -47,6 +77,17 @@ pub trait DetamuStore: Send + Sync {
         snapshot: &SnapshotId,
         entity: &EntityId,
         direction: RelationDirection,
+    ) -> Result<Vec<RelationObservation>, StoreError>;
+
+    async fn snapshot(&self, snapshot: &SnapshotId) -> Result<Option<SnapshotRecord>, StoreError>;
+
+    async fn snapshots(&self, world: Option<&WorldId>) -> Result<Vec<SnapshotRecord>, StoreError>;
+
+    async fn entities(&self, snapshot: &SnapshotId) -> Result<Vec<EntityObservation>, StoreError>;
+
+    async fn snapshot_relations(
+        &self,
+        snapshot: &SnapshotId,
     ) -> Result<Vec<RelationObservation>, StoreError>;
 }
 
@@ -127,6 +168,7 @@ fn normalized(value: f64) -> bool {
 
 #[derive(Debug, Default)]
 struct MemoryState {
+    snapshots: HashMap<SnapshotId, SnapshotRecord>,
     entities: HashMap<(SnapshotId, EntityId), EntityObservation>,
     relations: Vec<RelationObservation>,
 }
@@ -142,6 +184,9 @@ impl DetamuStore for InMemoryStore {
         validate_batch(&batch)?;
 
         let mut state = self.state.write().await;
+        state
+            .snapshots
+            .insert(batch.snapshot.clone(), SnapshotRecord::from(&batch));
         state
             .entities
             .retain(|(snapshot, _), _| snapshot != &batch.snapshot);
@@ -196,6 +241,66 @@ impl DetamuStore for InMemoryStore {
             })
             .cloned()
             .collect();
+        Ok(relations)
+    }
+
+    async fn snapshot(&self, snapshot: &SnapshotId) -> Result<Option<SnapshotRecord>, StoreError> {
+        Ok(self.state.read().await.snapshots.get(snapshot).cloned())
+    }
+
+    async fn snapshots(&self, world: Option<&WorldId>) -> Result<Vec<SnapshotRecord>, StoreError> {
+        let mut snapshots = self
+            .state
+            .read()
+            .await
+            .snapshots
+            .values()
+            .filter(|record| world.is_none_or(|world| record.snapshot.world == *world))
+            .cloned()
+            .collect::<Vec<_>>();
+        snapshots.sort_by(|left, right| {
+            left.snapshot
+                .world
+                .as_str()
+                .cmp(right.snapshot.world.as_str())
+                .then_with(|| {
+                    left.snapshot
+                        .version
+                        .as_str()
+                        .cmp(right.snapshot.version.as_str())
+                })
+        });
+        Ok(snapshots)
+    }
+
+    async fn entities(&self, snapshot: &SnapshotId) -> Result<Vec<EntityObservation>, StoreError> {
+        let mut entities = self
+            .state
+            .read()
+            .await
+            .entities
+            .iter()
+            .filter(|((candidate, _), _)| candidate == snapshot)
+            .map(|(_, observation)| observation.clone())
+            .collect::<Vec<_>>();
+        entities.sort_by(|left, right| left.entity.id.as_str().cmp(right.entity.id.as_str()));
+        Ok(entities)
+    }
+
+    async fn snapshot_relations(
+        &self,
+        snapshot: &SnapshotId,
+    ) -> Result<Vec<RelationObservation>, StoreError> {
+        let mut relations = self
+            .state
+            .read()
+            .await
+            .relations
+            .iter()
+            .filter(|observation| observation.snapshot == *snapshot)
+            .cloned()
+            .collect::<Vec<_>>();
+        relations.sort_by(|left, right| left.relation.id.as_str().cmp(right.relation.id.as_str()));
         Ok(relations)
     }
 }

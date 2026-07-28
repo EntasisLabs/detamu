@@ -1,6 +1,6 @@
 [package]
-name = "detamu-surreal"
-description = "Native SurrealDB storage backend for Detamu"
+name = "detamu-query"
+description = "World-model-agnostic snapshot queries, graph traversal, and diffs for Detamu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,18 +8,13 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-async-trait.workspace = true
 detamu-core.workspace = true
 detamu-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-surrealdb.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-detamu-model.workspace = true
-detamu-model-code.workspace = true
-tempfile = "3"
 tokio.workspace = true
 
 [lints]

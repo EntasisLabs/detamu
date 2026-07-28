@@ -7,9 +7,9 @@ use std::path::Path;
 use async_trait::async_trait;
 use detamu_core::{
     AnalysisCoverage, CommitMode, EntityId, EntityObservation, ObservationBatch,
-    RelationObservation, SnapshotId,
+    RelationObservation, SnapshotId, SnapshotVersion, WorldId,
 };
-use detamu_store::{DetamuStore, RelationDirection, StoreError, validate_batch};
+use detamu_store::{DetamuStore, RelationDirection, SnapshotRecord, StoreError, validate_batch};
 use serde_json::{Value, json};
 use surrealdb::{
     Connection, Surreal,
@@ -202,11 +202,148 @@ where
             })
             .collect()
     }
+
+    async fn snapshot(&self, snapshot: &SnapshotId) -> Result<Option<SnapshotRecord>, StoreError> {
+        let mut response = self.db.query("SELECT * OMIT id, committed_at FROM detamu_snapshot WHERE world_id = $world_id AND snapshot_version = $snapshot_version LIMIT 1")
+            .bind(("world_id", snapshot.world.as_str().to_owned()))
+            .bind(("snapshot_version", snapshot.version.as_str().to_owned()))
+            .await
+            .map_err(backend)?;
+        let rows: Vec<Value> = response.take(0).map_err(backend)?;
+        rows.first().map(snapshot_record).transpose()
+    }
+
+    async fn snapshots(&self, world: Option<&WorldId>) -> Result<Vec<SnapshotRecord>, StoreError> {
+        let mut response = if let Some(world) = world {
+            self.db
+                .query("SELECT * OMIT id, committed_at FROM detamu_snapshot WHERE world_id = $world_id")
+                .bind(("world_id", world.as_str().to_owned()))
+                .await
+        } else {
+            self.db
+                .query("SELECT * OMIT id, committed_at FROM detamu_snapshot")
+                .await
+        }
+        .map_err(backend)?;
+        let rows: Vec<Value> = response.take(0).map_err(backend)?;
+        let mut snapshots = rows
+            .iter()
+            .map(snapshot_record)
+            .collect::<Result<Vec<_>, _>>()?;
+        snapshots.sort_by(|left, right| {
+            left.snapshot
+                .world
+                .as_str()
+                .cmp(right.snapshot.world.as_str())
+                .then_with(|| {
+                    left.snapshot
+                        .version
+                        .as_str()
+                        .cmp(right.snapshot.version.as_str())
+                })
+        });
+        Ok(snapshots)
+    }
+
+    async fn entities(&self, snapshot: &SnapshotId) -> Result<Vec<EntityObservation>, StoreError> {
+        let mut response = self
+            .db
+            .query("SELECT payload FROM detamu_entity_observation WHERE world_id = $world_id AND snapshot_version = $snapshot_version")
+            .bind(("world_id", snapshot.world.as_str().to_owned()))
+            .bind(("snapshot_version", snapshot.version.as_str().to_owned()))
+            .await
+            .map_err(backend)?;
+        let rows: Vec<Value> = response.take(0).map_err(backend)?;
+        let mut entities = payloads(rows)?;
+        entities.sort_by(|left: &EntityObservation, right| {
+            left.entity.id.as_str().cmp(right.entity.id.as_str())
+        });
+        Ok(entities)
+    }
+
+    async fn snapshot_relations(
+        &self,
+        snapshot: &SnapshotId,
+    ) -> Result<Vec<RelationObservation>, StoreError> {
+        let mut response = self
+            .db
+            .query("SELECT payload FROM detamu_relation_observation WHERE world_id = $world_id AND snapshot_version = $snapshot_version")
+            .bind(("world_id", snapshot.world.as_str().to_owned()))
+            .bind(("snapshot_version", snapshot.version.as_str().to_owned()))
+            .await
+            .map_err(backend)?;
+        let rows: Vec<Value> = response.take(0).map_err(backend)?;
+        let mut relations = payloads(rows)?;
+        relations.sort_by(|left: &RelationObservation, right| {
+            left.relation.id.as_str().cmp(right.relation.id.as_str())
+        });
+        Ok(relations)
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]
 fn backend(error: surrealdb::Error) -> StoreError {
     StoreError::Backend(error.to_string())
+}
+
+fn payloads<T: serde::de::DeserializeOwned>(rows: Vec<Value>) -> Result<Vec<T>, StoreError> {
+    rows.into_iter()
+        .filter_map(|row| row.get("payload").cloned())
+        .map(|payload| {
+            serde_json::from_value(payload).map_err(|error| StoreError::Backend(error.to_string()))
+        })
+        .collect()
+}
+
+fn snapshot_record(row: &Value) -> Result<SnapshotRecord, StoreError> {
+    let field = |name: &str| {
+        row.get(name)
+            .ok_or_else(|| StoreError::Backend(format!("snapshot row lacks {name}")))
+    };
+    let string = |name: &str| {
+        field(name)?
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| StoreError::Backend(format!("snapshot {name} is not a string")))
+    };
+    let commit_mode = match string("commit_mode")?.as_str() {
+        "replace_snapshot" => CommitMode::ReplaceSnapshot,
+        value => {
+            return Err(StoreError::Backend(format!(
+                "unknown snapshot commit mode: {value}"
+            )));
+        }
+    };
+    let coverage = match string("coverage")?.as_str() {
+        "complete" => AnalysisCoverage::Complete,
+        "partial" => AnalysisCoverage::Partial,
+        "unavailable" => AnalysisCoverage::Unavailable,
+        value => {
+            return Err(StoreError::Backend(format!(
+                "unknown snapshot coverage: {value}"
+            )));
+        }
+    };
+    let count = |name: &str| {
+        field(name)?
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or_else(|| StoreError::Backend(format!("snapshot {name} is not a count")))
+    };
+    Ok(SnapshotRecord {
+        snapshot: SnapshotId::new(
+            WorldId::new(string("world_id")?),
+            SnapshotVersion::new(string("snapshot_version")?),
+        ),
+        commit_mode,
+        coverage,
+        provenance: serde_json::from_value(field("provenance")?.clone())
+            .map_err(|error| StoreError::Backend(error.to_string()))?,
+        diagnostics: serde_json::from_value(field("diagnostics")?.clone())
+            .map_err(|error| StoreError::Backend(error.to_string()))?,
+        entity_count: count("entity_count")?,
+        relation_count: count("relation_count")?,
+    })
 }
 
 fn entity_row(observation: &EntityObservation) -> Result<Value, serde_json::Error> {

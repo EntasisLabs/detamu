@@ -51,6 +51,12 @@ process host, or consumer. `detamu-sdk` orchestrates model analyzers and scoring
 models without branching on domain. The standalone engine remains a thin host
 around the SDK.
 
+Read-side composition follows the same boundary. `detamu-query` provides only
+world-model-neutral snapshot lookup, entity filtering, bounded traversal, and
+diffing. `detamu-query-code` layers source locations, dependency semantics, and
+AVEC completeness onto that generic facade. Consumers may depend on either layer
+without pulling orchestration or analyzer processes into their application.
+
 ## Hexagonal ports
 
 Inbound ports are the Rust SDK and standalone engine protocols. Outbound ports

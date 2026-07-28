@@ -822,12 +822,15 @@ name = "detamu-engine"
 version = "0.1.0"
 dependencies = [
  "detamu-code-coverage",
+ "detamu-core",
  "detamu-language",
  "detamu-language-lizard",
  "detamu-language-rust",
  "detamu-language-rust-analyzer",
  "detamu-model",
  "detamu-model-code",
+ "detamu-query",
+ "detamu-query-code",
  "detamu-sdk",
  "detamu-source-git",
  "detamu-store",
@@ -933,6 +936,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "detamu-query"
+version = "0.1.0"
+dependencies = [
+ "detamu-core",
+ "detamu-store",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "detamu-query-code"
+version = "0.1.0"
+dependencies = [
+ "detamu-core",
+ "detamu-model-code",
+ "detamu-query",
+ "detamu-store",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "detamu-sdk"
 version = "0.1.0"
 dependencies = [
@@ -964,6 +992,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "detamu-core",
+ "serde",
  "thiserror",
  "tokio",
 ]
@@ -977,6 +1006,7 @@ dependencies = [
  "detamu-model",
  "detamu-model-code",
  "detamu-store",
+ "serde",
  "serde_json",
  "surrealdb",
  "tempfile",
