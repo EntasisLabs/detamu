@@ -5,13 +5,20 @@
 
 mod avec;
 
-use std::{collections::BTreeMap, fmt::Write as _};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Write as _,
+};
 
 use detamu_core::{
     Attributes, Entity, EntityId, EntityObservation, EvidenceProvenance, Measurement, ModelId,
-    Relation, RelationId, RelationObservation, SnapshotId, SnapshotVersion, WorldId,
+    ObserverProvenance, Relation, RelationId, RelationObservation, SnapshotId, SnapshotVersion,
+    WorldId,
 };
-use detamu_model::{ModelAnalyzer, ModelDescriptor, ScoringModel, WorldModelPack};
+use detamu_model::{
+    AnalyzerCapability, DerivationError, DeriverDescriptor, ModelAnalyzer, ModelDescriptor,
+    ObservationDeriver, ScoringModel, WorldModelPack,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -96,8 +103,87 @@ impl WorldModelPack for CodeModelPack {
         Vec::new()
     }
 
+    fn derivers(&self) -> Vec<std::sync::Arc<dyn ObservationDeriver>> {
+        vec![std::sync::Arc::new(GraphMetricsDeriver)]
+    }
+
     fn scoring_models(&self) -> Vec<std::sync::Arc<dyn ScoringModel>> {
         vec![std::sync::Arc::new(self.avec)]
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GraphMetricsDeriver;
+
+impl ObservationDeriver for GraphMetricsDeriver {
+    fn descriptor(&self) -> DeriverDescriptor {
+        DeriverDescriptor {
+            name: "code.graph.metrics".to_owned(),
+            version: "1".to_owned(),
+            model: ModelId::new(CODE_MODEL_ID),
+            capabilities: vec![AnalyzerCapability::Metrics],
+        }
+    }
+
+    fn derive(&self, batch: &mut detamu_core::ObservationBatch) -> Result<(), DerivationError> {
+        if !batch
+            .provenance
+            .iter()
+            .any(|provenance| provenance.observer == "lsp.rust-analyzer")
+        {
+            return Ok(());
+        }
+        let mut degrees = HashMap::<EntityId, (u32, u32)>::new();
+        for observation in &batch.relations {
+            if observation.relation.kind == "contains" {
+                continue;
+            }
+            let from = degrees
+                .entry(observation.relation.from.clone())
+                .or_default();
+            from.1 = from.1.saturating_add(1);
+            let to = degrees.entry(observation.relation.to.clone()).or_default();
+            to.0 = to.0.saturating_add(1);
+        }
+        for observation in &mut batch.entities {
+            if observation.entity.model.as_str() != CODE_MODEL_ID
+                || observation.entity.kind == NodeKind::File.as_str()
+                || observation
+                    .attributes
+                    .get("language")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("rust")
+            {
+                continue;
+            }
+            let (incoming, outgoing) = degrees
+                .get(&observation.entity.id)
+                .copied()
+                .unwrap_or_default();
+            observation.measurements.extend([
+                observed_measurement(
+                    "graph.incoming_edges",
+                    incoming,
+                    "count",
+                    "code.graph.metrics",
+                    1.0,
+                ),
+                observed_measurement(
+                    "graph.outgoing_edges",
+                    outgoing,
+                    "count",
+                    "code.graph.metrics",
+                    1.0,
+                ),
+            ]);
+        }
+        batch.provenance.push(ObserverProvenance {
+            observer: "code.graph.metrics".to_owned(),
+            version: "1".to_owned(),
+            configuration_digest: Some("dependency-degree-v1".to_owned()),
+            source: None,
+        });
+        Ok(())
     }
 }
 
@@ -420,6 +506,62 @@ pub fn file_contains_symbol(
     }
 }
 
+pub fn imported_module_observation(
+    revision: &RevisionId,
+    language: &LanguageId,
+    import_path: &str,
+) -> EntityObservation {
+    let id = imported_module_id(language, import_path);
+    let mut attributes = Attributes::new();
+    attributes.insert("language".to_owned(), json!(language.as_str()));
+    attributes.insert("import_path".to_owned(), json!(import_path));
+    attributes.insert("resolution".to_owned(), json!("unresolved"));
+    EntityObservation {
+        snapshot: revision.snapshot(),
+        entity: Entity {
+            id,
+            model: ModelId::new(CODE_MODEL_ID),
+            kind: NodeKind::Module.as_str().to_owned(),
+            label: import_path.to_owned(),
+        },
+        attributes,
+        measurements: Vec::new(),
+        scores: Vec::new(),
+    }
+}
+
+pub fn file_imports_module(
+    revision: &RevisionId,
+    file_path: &str,
+    language: &LanguageId,
+    import_path: &str,
+) -> RelationObservation {
+    let from = EntityId::new(format!("file:{file_path}"));
+    let to = imported_module_id(language, import_path);
+    RelationObservation {
+        snapshot: revision.snapshot(),
+        relation: Relation {
+            id: RelationId::new(format!("{}:imports:{}", from.as_str(), to.as_str())),
+            model: ModelId::new(CODE_MODEL_ID),
+            kind: DependencyType::Imports.as_str(),
+            from,
+            to,
+        },
+        weight: 1.0,
+        attributes: Attributes::new(),
+    }
+}
+
+fn imported_module_id(language: &LanguageId, import_path: &str) -> EntityId {
+    let identity = format!("{}:{import_path}", language.as_str()).to_lowercase();
+    let digest = Sha256::digest(identity.as_bytes());
+    let mut hash = String::with_capacity(32);
+    for byte in &digest[..16] {
+        write!(hash, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    EntityId::new(format!("module_{hash}"))
+}
+
 impl NodeMetrics {
     pub fn total_degree(self) -> u32 {
         self.incoming_edges.saturating_add(self.outgoing_edges)
@@ -474,7 +616,7 @@ impl NodeMetrics {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyType {
     Calls,
@@ -621,4 +763,73 @@ fn exact_u32(measurements: &[Measurement], name: &str) -> Option<u32> {
     let value = value(measurements, name)?;
     (value.is_finite() && value >= 0.0 && value <= f64::from(u32::MAX) && value.fract() == 0.0)
         .then_some(value as u32)
+}
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+
+    fn symbol(revision: &RevisionId, name: &str, line: u32) -> EntityObservation {
+        syntax_symbol_observation(
+            revision,
+            CodeSymbol {
+                id: acc_symbol_id("src/lib.rs", name, line),
+                language: LanguageId::new("rust"),
+                qualified_name: name.to_owned(),
+                kind: NodeKind::Function,
+            },
+            SymbolLocation {
+                file_path: "src/lib.rs",
+                line_start: line,
+                line_end: line,
+                signature: None,
+            },
+            SyntaxMetrics {
+                lines_of_code: 1,
+                cyclomatic_complexity: 1,
+                parameters: 0,
+            },
+            None,
+            "treesitter.rust",
+            0.9,
+        )
+    }
+
+    #[test]
+    fn derives_degrees_after_semantic_graph_reconciliation() {
+        let revision = RevisionId::new(RepositoryId::new("fixture"), GitOid::new("abc"));
+        let source_id = acc_symbol_id("src/lib.rs", "caller", 1);
+        let target_id = acc_symbol_id("src/lib.rs", "callee", 2);
+        let mut batch = detamu_core::ObservationBatch::empty(revision.snapshot());
+        batch.entities.extend([
+            symbol(&revision, "caller", 1),
+            symbol(&revision, "callee", 2),
+        ]);
+        batch.relations.push(dependency_observation(
+            &revision,
+            &source_id,
+            &target_id,
+            &DependencyType::Calls,
+            1.0,
+        ));
+        batch.provenance.push(ObserverProvenance {
+            observer: "lsp.rust-analyzer".to_owned(),
+            version: "1".to_owned(),
+            configuration_digest: None,
+            source: None,
+        });
+
+        GraphMetricsDeriver
+            .derive(&mut batch)
+            .expect("derive graph metrics");
+
+        assert_eq!(
+            exact_u32(&batch.entities[0].measurements, "graph.outgoing_edges"),
+            Some(1)
+        );
+        assert_eq!(
+            exact_u32(&batch.entities[1].measurements, "graph.incoming_edges"),
+            Some(1)
+        );
+    }
 }

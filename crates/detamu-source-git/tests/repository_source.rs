@@ -113,10 +113,23 @@ async fn discovery_is_rooted_at_an_immutable_commit() {
             .iter()
             .map(|file| file.path.as_str())
             .collect::<Vec<_>>(),
-        ["src/lib.rs", "web/app.ts"]
+        ["README.md", "src/lib.rs", "web/app.ts"]
     );
-    assert_eq!(files[0].language.as_str(), "rust");
-    assert_eq!(files[1].language.as_str(), "typescript");
+    assert_eq!(files[0].language, None);
+    assert_eq!(
+        files[1]
+            .language
+            .as_ref()
+            .map(detamu_model_code::LanguageId::as_str),
+        Some("rust")
+    );
+    assert_eq!(
+        files[2]
+            .language
+            .as_ref()
+            .map(detamu_model_code::LanguageId::as_str),
+        Some("typescript")
+    );
     assert!(files.iter().all(|file| !file.blob_oid.is_empty()));
 
     let source = GitRepositorySource;
@@ -131,6 +144,12 @@ async fn discovery_is_rooted_at_an_immutable_commit() {
         .artifacts(&resolution.input.sources[0])
         .await
         .expect("list artifacts");
+    assert!(
+        artifacts
+            .iter()
+            .any(|artifact| artifact.path == "README.md"),
+        "non-source blobs remain available for semantic workspaces"
+    );
     let rust = artifacts
         .into_iter()
         .find(|artifact| artifact.path == "src/lib.rs")

@@ -51,7 +51,7 @@ pub struct TrackedFile {
     pub blob_oid: String,
     pub mode: String,
     pub size: Option<u64>,
-    pub language: LanguageId,
+    pub language: Option<LanguageId>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -108,7 +108,7 @@ impl GitRepositorySource {
         })
     }
 
-    /// Lists supported tracked source files from the snapshot's commit tree.
+    /// Lists every tracked blob from the snapshot's commit tree.
     ///
     /// # Errors
     ///
@@ -194,7 +194,13 @@ impl ArtifactReader for GitRepositorySource {
             .map_err(|error| ArtifactError::Failed(error.to_string()))?;
         Ok(files
             .into_iter()
-            .map(|file| artifact(&file, histories.get(&file.path)))
+            .map(|file| {
+                let history = file
+                    .language
+                    .as_ref()
+                    .and_then(|_| histories.get(&file.path));
+                artifact(&file, history)
+            })
             .collect())
     }
 
@@ -318,16 +324,18 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
         });
         batch.entities = files
             .iter()
-            .map(|file| {
+            .filter_map(|file| {
+                let language = file.language.as_ref()?;
                 file_observation(
                     &revision,
                     &file.path,
                     &file.blob_oid,
                     &file.mode,
                     file.size,
-                    &file.language,
+                    language,
                     histories.get(&file.path),
                 )
+                .into()
             })
             .collect();
         Ok(batch)
@@ -346,7 +354,9 @@ fn repository_id(root: &Path, remote: Option<&str>) -> RepositoryId {
 
 fn artifact(file: &TrackedFile, history: Option<&FileHistory>) -> Artifact {
     let mut attributes = BTreeMap::new();
-    attributes.insert("language".to_owned(), json!(file.language.as_str()));
+    if let Some(language) = &file.language {
+        attributes.insert("language".to_owned(), json!(language.as_str()));
+    }
     attributes.insert("git.mode".to_owned(), json!(file.mode));
     attributes.insert("file.size_bytes".to_owned(), json!(file.size));
     if let Some(history) = history {
@@ -373,7 +383,11 @@ fn artifact(file: &TrackedFile, history: Option<&FileHistory>) -> Artifact {
     Artifact {
         path: file.path.clone(),
         content_id: file.blob_oid.clone(),
-        media_type: media_type(&file.language).map(str::to_owned),
+        media_type: file
+            .language
+            .as_ref()
+            .and_then(media_type)
+            .map(str::to_owned),
         attributes,
     }
 }
@@ -476,9 +490,6 @@ fn parse_tree(bytes: &[u8]) -> Result<Vec<TrackedFile>, SourceError> {
                 "Git tree contains a newline in a path".to_owned(),
             ));
         }
-        let Some(language) = detect_language(path) else {
-            continue;
-        };
         let metadata = std::str::from_utf8(metadata)
             .map_err(|_| SourceError::Failed("malformed Git tree metadata".to_owned()))?;
         let fields = metadata.split_whitespace().collect::<Vec<_>>();
@@ -493,7 +504,7 @@ fn parse_tree(bytes: &[u8]) -> Result<Vec<TrackedFile>, SourceError> {
                 .then(|| fields[3].parse::<u64>())
                 .transpose()
                 .map_err(|error| SourceError::Failed(format!("invalid Git blob size: {error}")))?,
-            language,
+            language: detect_language(path),
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));

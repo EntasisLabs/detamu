@@ -118,13 +118,20 @@ impl<S: TreeSitterSpec> ModelAnalyzer for TreeSitterAnalyzer<S> {
                         "source contains syntax errors; observations may be incomplete",
                     ));
                 }
+                let mut observations = ObservationBatch::empty(revision.snapshot());
                 spec.observe_tree(
                     &revision,
                     &content.artifact,
                     &content.bytes,
                     tree.root_node(),
-                    &mut batch,
+                    &mut observations,
                 );
+                batch.merge(observations).map_err(|_| {
+                    AnalyzerError::Failed(format!(
+                        "{} emitted conflicting observations",
+                        spec.observer()
+                    ))
+                })?;
             }
             Ok(batch)
         })

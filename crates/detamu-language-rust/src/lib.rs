@@ -1,6 +1,6 @@
 //! Rust syntax analyzer for the Detamu code world model.
 
-use std::{path::Path, sync::Arc};
+use std::{collections::BTreeSet, path::Path, sync::Arc};
 
 use detamu_core::ObservationBatch;
 use detamu_language::LanguagePack;
@@ -8,7 +8,8 @@ use detamu_language_tree_sitter::{TreeSitterAnalyzer, TreeSitterSpec};
 use detamu_model::{AnalyzerCapability, Artifact, ArtifactReader, ModelAnalyzer};
 use detamu_model_code::{
     CodeSymbol, FileHistory, LanguageId, NodeKind, RecentFrequency, RevisionId, SymbolLocation,
-    SyntaxMetrics, acc_symbol_id, file_contains_symbol, syntax_symbol_observation,
+    SyntaxMetrics, acc_symbol_id, file_contains_symbol, file_imports_module,
+    imported_module_observation, syntax_symbol_observation,
 };
 use tree_sitter::Node;
 
@@ -74,6 +75,7 @@ impl TreeSitterSpec for RustTreeSitterSpec {
             AnalyzerCapability::Symbols,
             AnalyzerCapability::Hierarchy,
             AnalyzerCapability::Metrics,
+            AnalyzerCapability::Imports,
         ]
     }
 
@@ -86,6 +88,7 @@ impl TreeSitterSpec for RustTreeSitterSpec {
         batch: &mut ObservationBatch,
     ) {
         let history = history(artifact);
+        collect_imports(revision, root, source, &artifact.path, batch);
         collect_symbols(
             revision,
             root,
@@ -94,6 +97,48 @@ impl TreeSitterSpec for RustTreeSitterSpec {
             history.as_ref(),
             batch,
         );
+    }
+}
+
+fn collect_imports(
+    revision: &RevisionId,
+    root: Node<'_>,
+    source: &[u8],
+    path: &str,
+    batch: &mut ObservationBatch,
+) {
+    let mut imports = BTreeSet::new();
+    collect_import_paths(root, source, &mut imports);
+    let language = LanguageId::new("rust");
+    for import_path in imports {
+        batch.entities.push(imported_module_observation(
+            revision,
+            &language,
+            &import_path,
+        ));
+        batch
+            .relations
+            .push(file_imports_module(revision, path, &language, &import_path));
+    }
+}
+
+fn collect_import_paths(node: Node<'_>, source: &[u8], imports: &mut BTreeSet<String>) {
+    if node.kind() == "use_declaration"
+        && let Ok(text) = node.utf8_text(source)
+    {
+        let import = text
+            .trim()
+            .strip_prefix("use ")
+            .unwrap_or(text)
+            .trim_end_matches(';')
+            .trim();
+        if !import.is_empty() {
+            imports.insert(import.to_owned());
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        collect_import_paths(child, source, imports);
     }
 }
 
@@ -314,6 +359,8 @@ mod tests {
     use super::*;
 
     const SOURCE: &str = r"
+use std::fmt;
+
 pub struct Greeter;
 
 impl Greeter {
@@ -412,8 +459,8 @@ pub fn choose(value: u8) -> u8 {
             .expect("analyze Rust fixture");
 
         assert_eq!(batch.snapshot, snapshot);
-        assert_eq!(batch.entities.len(), 3);
-        assert_eq!(batch.relations.len(), 3);
+        assert_eq!(batch.entities.len(), 4);
+        assert_eq!(batch.relations.len(), 4);
         let greet = batch
             .entities
             .iter()
@@ -423,10 +470,24 @@ pub fn choose(value: u8) -> u8 {
         assert_eq!(measurement(greet, "code.parameters"), Some(2.0));
         assert_eq!(measurement(greet, "code.cyclomatic_complexity"), Some(3.0));
         assert_eq!(measurement(greet, "git.total_commits"), Some(2.0));
-        assert!(batch.relations.iter().all(|relation| {
-            relation.relation.kind == "contains"
+        assert_eq!(
+            batch
+                .relations
+                .iter()
+                .filter(|relation| relation.relation.kind == "contains")
+                .count(),
+            3
+        );
+        assert!(batch.relations.iter().any(|relation| {
+            relation.relation.kind == "imports"
                 && relation.relation.from.as_str() == "file:src/lib.rs"
         }));
+        assert!(
+            batch
+                .entities
+                .iter()
+                .any(|entity| entity.entity.label == "std::fmt")
+        );
     }
 
     fn measurement(entity: &detamu_core::EntityObservation, name: &str) -> Option<f64> {

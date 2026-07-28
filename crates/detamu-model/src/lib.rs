@@ -162,6 +162,32 @@ pub trait ModelAnalyzer: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeriverDescriptor {
+    pub name: String,
+    pub version: String,
+    pub model: ModelId,
+    pub capabilities: Vec<AnalyzerCapability>,
+}
+
+#[derive(Debug, Error)]
+pub enum DerivationError {
+    #[error("observation derivation failed: {0}")]
+    Failed(String),
+}
+
+/// Enriches a reconciled observation batch before scoring and persistence.
+pub trait ObservationDeriver: Send + Sync {
+    fn descriptor(&self) -> DeriverDescriptor;
+
+    /// Adds deterministic evidence derived from the reconciled entity graph.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the batch is incompatible or cannot be enriched.
+    fn derive(&self, batch: &mut ObservationBatch) -> Result<(), DerivationError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScoringModelDescriptor {
     pub id: detamu_core::ScoreModelId,
     pub version: u32,
@@ -192,6 +218,8 @@ pub trait WorldModelPack: Send + Sync {
     fn descriptor(&self) -> ModelDescriptor;
 
     fn analyzers(&self) -> Vec<Arc<dyn ModelAnalyzer>>;
+
+    fn derivers(&self) -> Vec<Arc<dyn ObservationDeriver>>;
 
     fn scoring_models(&self) -> Vec<Arc<dyn ScoringModel>>;
 }

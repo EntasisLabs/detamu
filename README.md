@@ -24,10 +24,14 @@ The current workspace establishes:
 - rename-aware bulk Git history with contributor, churn, timing, and recent
   frequency evidence anchored to each snapshot;
 - immutable artifact access and a reusable Tree-sitter host, with a Rust pack
-  producing types, functions, methods, syntax metrics, and containment;
+  producing types, functions, methods, imports, syntax metrics, and containment;
 - an optional Lizard compatibility adapter for broad baseline language coverage;
 - a generic, process-isolated LSP lifecycle and JSON-RPC transport for future
   semantic language adapters;
+- an optional rust-analyzer adapter that materializes the complete immutable Git
+  tree and normalizes workspace references and calls into code relations;
+- a reconciled-batch derivation stage producing graph degree measurements before
+  AVEC scoring;
 - typed analyzer capabilities, optional-tool degradation, and per-measurement
   provenance/confidence for deterministic multi-analyzer reconciliation;
 - generic storage with an in-memory behavioral reference;
@@ -35,8 +39,8 @@ The current workspace establishes:
   snapshot replacement;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is the first LSP semantic adapter plus Rust dependency
-extraction and graph-derived measurements, followed by ACC graph golden fixtures.
+The next milestone is live rust-analyzer compatibility fixtures, richer import
+resolution, and ACC graph golden comparisons.
 
 ## Workspace
 
@@ -48,6 +52,7 @@ extraction and graph-derived measurements, followed by ACC graph golden fixtures
 | `detamu-language` | Language extensions within the code model |
 | `detamu-language-tree-sitter` | Shared immutable-artifact parsing lifecycle |
 | `detamu-language-rust` | Rust symbols, hierarchy, and syntax complexity |
+| `detamu-language-rust-analyzer` | Optional Rust references and call graph |
 | `detamu-language-lizard` | Optional broad-coverage ACC metrics compatibility |
 | `detamu-language-lsp` | Generic LSP stdio lifecycle and adapter boundary |
 | `detamu-source-git` | Git discovery, snapshot resolution, and tracked-file inventory |
@@ -66,6 +71,9 @@ cargo run -p detamu-engine -- doctor
 cargo run -p detamu-engine -- init ./data/detamu.surrealkv
 cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
 ```
+
+Set `DETAMU_RUST_ANALYZER` to an explicit rust-analyzer binary when it is not
+available on `PATH`. `detamu doctor` reports whether the configured binary works.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain
 stable as models and analyzers are added.

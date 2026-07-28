@@ -102,7 +102,18 @@ impl LspSession {
                 json!({
                     "processId": std::process::id(),
                     "rootUri": config.root_uri,
-                    "capabilities": {},
+                    "workspaceFolders": config.root_uri.as_ref().map(|uri| vec![json!({
+                        "uri": uri,
+                        "name": "detamu-workspace",
+                    })]),
+                    "capabilities": {
+                        "workspace": { "workspaceFolders": true, "symbol": {} },
+                        "textDocument": {
+                            "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
+                            "references": {},
+                            "callHierarchy": {},
+                        }
+                    },
                     "initializationOptions": config.initialization_options,
                 }),
             )
@@ -131,6 +142,16 @@ impl LspSession {
             loop {
                 let message = read_message(&mut self.stdout).await?;
                 if message.get("id").and_then(Value::as_u64) != Some(id) {
+                    if message.get("method").is_some()
+                        && let Some(server_id) = message.get("id").cloned()
+                    {
+                        self.write_message(&json!({
+                            "jsonrpc": "2.0",
+                            "id": server_id,
+                            "result": null,
+                        }))
+                        .await?;
+                    }
                     continue;
                 }
                 if let Some(error) = message.get("error") {
@@ -155,6 +176,36 @@ impl LspSession {
             "params": parameters,
         }))
         .await
+    }
+
+    /// Waits for the next server notification with the requested method.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on framing, timeout, or I/O failure.
+    pub async fn wait_for_notification(&mut self, method: &str) -> Result<Value, LspError> {
+        timeout(self.request_timeout, async {
+            loop {
+                let message = read_message(&mut self.stdout).await?;
+                if message.get("method").and_then(Value::as_str) == Some(method)
+                    && message.get("id").is_none()
+                {
+                    return Ok(message.get("params").cloned().unwrap_or(Value::Null));
+                }
+                if message.get("method").is_some()
+                    && let Some(server_id) = message.get("id").cloned()
+                {
+                    self.write_message(&json!({
+                        "jsonrpc": "2.0",
+                        "id": server_id,
+                        "result": null,
+                    }))
+                    .await?;
+                }
+            }
+        })
+        .await
+        .map_err(|_| LspError::Timeout)?
     }
 
     /// Performs the LSP shutdown/exit handshake and waits for the process.

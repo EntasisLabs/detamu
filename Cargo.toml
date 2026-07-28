@@ -6,6 +6,7 @@ members = [
     "crates/detamu-language-lizard",
     "crates/detamu-language-lsp",
     "crates/detamu-language-rust",
+    "crates/detamu-language-rust-analyzer",
     "crates/detamu-language-tree-sitter",
     "crates/detamu-model",
     "crates/detamu-model-code",
@@ -30,6 +31,7 @@ detamu-language = { path = "crates/detamu-language" }
 detamu-language-lizard = { path = "crates/detamu-language-lizard" }
 detamu-language-lsp = { path = "crates/detamu-language-lsp" }
 detamu-language-rust = { path = "crates/detamu-language-rust" }
+detamu-language-rust-analyzer = { path = "crates/detamu-language-rust-analyzer" }
 detamu-language-tree-sitter = { path = "crates/detamu-language-tree-sitter" }
 detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
@@ -43,6 +45,7 @@ thiserror = "2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tree-sitter = "0.26.11"
 tree-sitter-rust = "0.24.2"
+url = "2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

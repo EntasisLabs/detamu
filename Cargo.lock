@@ -812,6 +812,7 @@ dependencies = [
  "detamu-language",
  "detamu-language-lizard",
  "detamu-language-rust",
+ "detamu-language-rust-analyzer",
  "detamu-model",
  "detamu-model-code",
  "detamu-sdk",
@@ -868,6 +869,20 @@ dependencies = [
  "tokio",
  "tree-sitter",
  "tree-sitter-rust",
+]
+
+[[package]]
+name = "detamu-language-rust-analyzer"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-language-lsp",
+ "detamu-model",
+ "detamu-model-code",
+ "serde_json",
+ "tokio",
+ "url",
 ]
 
 [[package]]

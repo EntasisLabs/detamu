@@ -6,8 +6,8 @@ use detamu_core::{
     AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ObservationBatch, SnapshotId,
 };
 use detamu_model::{
-    AnalysisInput, AnalyzerError, AnalyzerExecution, ModelAnalyzer, ScoringError, ScoringModel,
-    SourceError, SourceRequest, WorldSource,
+    AnalysisInput, AnalyzerError, AnalyzerExecution, DerivationError, ModelAnalyzer,
+    ObservationDeriver, ScoringError, ScoringModel, SourceError, SourceRequest, WorldSource,
 };
 use detamu_store::{DetamuStore, StoreError};
 use thiserror::Error;
@@ -21,6 +21,8 @@ pub enum DetamuError {
     #[error(transparent)]
     Scoring(#[from] ScoringError),
     #[error(transparent)]
+    Derivation(#[from] DerivationError),
+    #[error(transparent)]
     Store(#[from] StoreError),
     #[error("analyzer returned observations for a different snapshot")]
     SnapshotMismatch,
@@ -31,6 +33,7 @@ pub struct IndexReport {
     pub snapshot: SnapshotId,
     pub analyzers_run: usize,
     pub analyzers_skipped: usize,
+    pub derivers_run: usize,
     pub scoring_models_run: usize,
     pub entities: usize,
     pub relations: usize,
@@ -40,6 +43,7 @@ pub struct IndexReport {
 pub struct Detamu {
     store: Arc<dyn DetamuStore>,
     analyzers: Vec<Arc<dyn ModelAnalyzer>>,
+    derivers: Vec<Arc<dyn ObservationDeriver>>,
     scoring_models: Vec<Arc<dyn ScoringModel>>,
 }
 
@@ -48,6 +52,7 @@ impl Detamu {
         DetamuBuilder {
             store,
             analyzers: Vec::new(),
+            derivers: Vec::new(),
             scoring_models: Vec::new(),
         }
     }
@@ -98,6 +103,9 @@ impl Detamu {
         }
 
         let mut combined = combined.unwrap_or_else(|| ObservationBatch::empty(input.snapshot));
+        for deriver in &self.derivers {
+            deriver.derive(&mut combined)?;
+        }
         for scoring_model in &self.scoring_models {
             scoring_model.score(&mut combined)?;
         }
@@ -106,6 +114,7 @@ impl Detamu {
             snapshot: combined.snapshot.clone(),
             analyzers_run,
             analyzers_skipped,
+            derivers_run: self.derivers.len(),
             scoring_models_run: self.scoring_models.len(),
             entities: combined.entities.len(),
             relations: combined.relations.len(),
@@ -148,6 +157,7 @@ impl Detamu {
 pub struct DetamuBuilder {
     store: Arc<dyn DetamuStore>,
     analyzers: Vec<Arc<dyn ModelAnalyzer>>,
+    derivers: Vec<Arc<dyn ObservationDeriver>>,
     scoring_models: Vec<Arc<dyn ScoringModel>>,
 }
 
@@ -168,6 +178,21 @@ impl DetamuBuilder {
     }
 
     #[must_use]
+    pub fn deriver(mut self, deriver: Arc<dyn ObservationDeriver>) -> Self {
+        self.derivers.push(deriver);
+        self
+    }
+
+    #[must_use]
+    pub fn derivers(
+        mut self,
+        derivers: impl IntoIterator<Item = Arc<dyn ObservationDeriver>>,
+    ) -> Self {
+        self.derivers.extend(derivers);
+        self
+    }
+
+    #[must_use]
     pub fn scoring_model(mut self, scoring_model: Arc<dyn ScoringModel>) -> Self {
         self.scoring_models.push(scoring_model);
         self
@@ -177,6 +202,7 @@ impl DetamuBuilder {
         Detamu {
             store: self.store,
             analyzers: self.analyzers,
+            derivers: self.derivers,
             scoring_models: self.scoring_models,
         }
     }

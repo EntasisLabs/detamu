@@ -65,10 +65,12 @@ requirements for a stable dynamic plugin ABI.
 immutable Detamu snapshot plus analyzer input. A source may expose mutable labels
 such as branches, but snapshot identity must use an immutable source version.
 
-`ArtifactReader` exposes content-addressed artifacts at that immutable source
+`ArtifactReader` exposes every content-addressed blob at that immutable source
 version. Language analyzers depend on this port rather than Git or the mutable
-filesystem. The Git implementation uses one `cat-file --batch` process to read
-all requested blobs and verifies every returned object identity.
+filesystem. The Git inventory emits entities only for recognized source files,
+while semantic engines may materialize manifests and configuration from the full
+tree. The Git implementation uses one `cat-file --batch` process to read all
+requested blobs and verifies every returned object identity.
 
 Observers may enrich the same entity. Batch reconciliation merges non-conflicting
 attributes, measurements, and scores by stable entity identity, deduplicates
@@ -120,7 +122,9 @@ methods. It produces:
 - one-based source ranges and qualified names;
 - source signatures, LOC, parameter counts, and syntax complexity;
 - inherited file-history evidence;
-- `file -> contains -> symbol` relations.
+- `file -> contains -> symbol` relations;
+- structural `file -> imports -> module` relations, including unresolved targets
+  as explicit module entities rather than missing endpoints.
 
 Syntax complexity version `syntax-metrics-v1` starts functions at one and counts
 branching and loop constructs, match arms, try expressions, and boolean decision
@@ -141,11 +145,21 @@ Detamu does not reimplement every language frontend. Code analysis is layered:
 - `detamu-language-lsp` provides a generic stdio process lifecycle, initialize /
   shutdown handshake, Content-Length JSON-RPC framing, request timeouts, and an
   adapter trait. Language-specific packs own LSP requests and normalization.
+- `detamu-language-rust-analyzer` materializes the complete committed tree in an
+  isolated temporary workspace, disables build scripts and procedural macros,
+  and translates document symbols, references, and call hierarchy responses into
+  ACC-compatible relation endpoints. It never analyzes the mutable worktree.
 
 All layers emit the same normalized code model. Lizard has lower metric confidence
 than the in-process Rust syntax specification, so both values remain inspectable
 while scoring selects the higher-confidence evidence. LSP adapters can add deeper
 references, calls, types, and diagnostics without changing the kernel.
+
+After analyzer batches reconcile, `ObservationDeriver` extensions may calculate
+evidence requiring a global view of the snapshot. The code graph deriver counts
+non-containment dependency edges and emits incoming/outgoing measurements only
+when rust-analyzer provenance proves that semantic analysis ran. An unavailable
+semantic engine therefore remains unknown rather than becoming a misleading zero.
 
 ## Observation and scoring flow
 
@@ -154,6 +168,7 @@ world sources
   -> model analyzers
   -> normalized observation batches
   -> reconciliation / merge
+  -> deterministic observation derivation
   -> model scoring
   -> atomic snapshot commit
   -> graph, comparison, and impact queries
@@ -193,7 +208,7 @@ graph.
 
 1. Keep the generic seams stable.
 2. Port ACC behavior into `detamu-model-code`.
-3. Add the first LSP adapter, Rust dependency extraction, and graph measurements.
+3. Verify rust-analyzer protocol compatibility and improve import resolution.
 4. Verify formulas, Lizard parity, and graph output with C# ACC golden fixtures.
 5. Add languages through Tree-sitter specifications and LSP launch adapters.
 6. Prove the architecture with a second pack for GitHub issues and pull requests.

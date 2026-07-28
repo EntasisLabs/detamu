@@ -3,8 +3,9 @@ use std::{process::ExitCode, sync::Arc};
 use detamu_language::LanguagePack;
 use detamu_language_lizard::LizardAnalyzer;
 use detamu_language_rust::RustLanguagePack;
+use detamu_language_rust_analyzer::RustAnalyzer;
 use detamu_model::SourceRequest;
-use detamu_model_code::AvecCodeScorer;
+use detamu_model_code::{AvecCodeScorer, GraphMetricsDeriver};
 use detamu_sdk::Detamu;
 use detamu_source_git::{GitRepositoryAnalyzer, GitRepositorySource};
 use detamu_surreal::SurrealStore;
@@ -20,6 +21,7 @@ async fn main() -> ExitCode {
         }
         Some("doctor") => {
             let lizard = LizardAnalyzer::new(Arc::new(GitRepositorySource));
+            let rust_analyzer = RustAnalyzer::from_environment(Arc::new(GitRepositorySource));
             let report = serde_json::json!({
                 "name": "detamu",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -32,6 +34,7 @@ async fn main() -> ExitCode {
                     "tree_sitter": true,
                     "lizard": lizard.is_available().await,
                     "lsp_host": true,
+                    "rust_analyzer": rust_analyzer.is_available().await,
                 },
             });
             println!("{report}");
@@ -115,6 +118,10 @@ async fn index_repository(
         .analyzer(Arc::new(GitRepositoryAnalyzer))
         .analyzers(rust.analyzers())
         .analyzer(Arc::new(LizardAnalyzer::new(Arc::new(GitRepositorySource))))
+        .analyzer(Arc::new(RustAnalyzer::from_environment(Arc::new(
+            GitRepositorySource,
+        ))))
+        .deriver(Arc::new(GraphMetricsDeriver))
         .scoring_model(Arc::new(AvecCodeScorer::default()))
         .build();
     let request = SourceRequest {
@@ -130,6 +137,7 @@ async fn index_repository(
                 "relations": report.relations,
                 "analyzers_run": report.analyzers_run,
                 "analyzers_skipped": report.analyzers_skipped,
+                "derivers_run": report.derivers_run,
                 "coverage": format!("{:?}", report.coverage).to_ascii_lowercase(),
             });
             println!("{result}");
