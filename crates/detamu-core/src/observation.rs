@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
 
 use crate::{EntityId, ModelId, RelationId, ScoreModelId, SnapshotId};
 
@@ -136,8 +137,11 @@ impl ObservationBatch {
     /// Returns [`BatchMismatch`] when the batches describe different snapshots
     /// or use different commit semantics.
     pub fn merge(&mut self, mut other: Self) -> Result<(), BatchMismatch> {
-        if self.snapshot != other.snapshot || self.commit_mode != other.commit_mode {
-            return Err(BatchMismatch);
+        if self.snapshot != other.snapshot {
+            return Err(BatchMismatch::new("batches describe different snapshots"));
+        }
+        if self.commit_mode != other.commit_mode {
+            return Err(BatchMismatch::new("batches use different commit semantics"));
         }
 
         self.provenance.append(&mut other.provenance);
@@ -159,7 +163,10 @@ impl ObservationBatch {
                 .find(|existing| existing.relation.id == observation.relation.id)
             {
                 if existing != &observation {
-                    return Err(BatchMismatch);
+                    return Err(BatchMismatch::new(format!(
+                        "relation {} has conflicting observations",
+                        observation.relation.id
+                    )));
                 }
             } else {
                 self.relations.push(observation);
@@ -178,9 +185,21 @@ fn merge_entity(
     if existing.snapshot != incoming.snapshot
         || existing.entity.id != incoming.entity.id
         || existing.entity.model != incoming.entity.model
-        || existing.entity.kind != incoming.entity.kind
     {
-        return Err(BatchMismatch);
+        return Err(BatchMismatch::new(format!(
+            "entity {} has conflicting identity",
+            incoming.entity.id
+        )));
+    }
+    if existing.entity.kind != incoming.entity.kind {
+        if existing.entity.kind == "unknown" {
+            existing.entity.kind.clone_from(&incoming.entity.kind);
+        } else if incoming.entity.kind != "unknown" {
+            return Err(BatchMismatch::new(format!(
+                "entity {} has conflicting kinds {} and {}",
+                incoming.entity.id, existing.entity.kind, incoming.entity.kind
+            )));
+        }
     }
     if preferred_label(&incoming.entity.label, &existing.entity.label) {
         existing.entity.label = incoming.entity.label;
@@ -191,7 +210,10 @@ fn merge_entity(
             .get(&name)
             .is_some_and(|current| current != &value)
         {
-            return Err(BatchMismatch);
+            return Err(BatchMismatch::new(format!(
+                "entity {} has conflicting attribute {name}",
+                existing.entity.id
+            )));
         }
         existing.attributes.insert(name, value);
     }
@@ -205,7 +227,10 @@ fn merge_entity(
                         .map(|evidence| &evidence.observer)
         }) {
             if current != &measurement {
-                return Err(BatchMismatch);
+                return Err(BatchMismatch::new(format!(
+                    "entity {} has conflicting measurement {}",
+                    existing.entity.id, measurement.name
+                )));
             }
         } else {
             existing.measurements.push(measurement);
@@ -218,7 +243,10 @@ fn merge_entity(
                 && current.dimension == score.dimension
         }) {
             if current != &score {
-                return Err(BatchMismatch);
+                return Err(BatchMismatch::new(format!(
+                    "entity {} has conflicting score {}",
+                    existing.entity.id, score.dimension
+                )));
             }
         } else {
             existing.scores.push(score);
@@ -236,8 +264,26 @@ fn preferred_label(candidate: &str, current: &str) -> bool {
         .is_gt()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BatchMismatch;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchMismatch {
+    reason: String,
+}
+
+impl BatchMismatch {
+    fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+        }
+    }
+}
+
+impl fmt::Display for BatchMismatch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.reason.fmt(formatter)
+    }
+}
+
+impl std::error::Error for BatchMismatch {}
 
 fn merge_coverage(left: AnalysisCoverage, right: AnalysisCoverage) -> AnalysisCoverage {
     use AnalysisCoverage::{Complete, Partial, Unavailable};
@@ -295,5 +341,22 @@ mod tests {
         let mut right = ObservationBatch::empty(snapshot);
         right.entities.push(observed("syntax.complexity", 3.0));
         assert!(left.merge(right).is_err());
+    }
+
+    #[test]
+    fn merge_prefers_a_concrete_kind_over_unknown() {
+        let snapshot = SnapshotId::new(WorldId::new("world"), SnapshotVersion::new("v1"));
+        let mut left = ObservationBatch::empty(snapshot.clone());
+        let mut uncertain = observed("syntax.complexity", 2.0);
+        uncertain.entity.kind = "unknown".to_owned();
+        left.entities.push(uncertain);
+        let mut right = ObservationBatch::empty(snapshot);
+        let mut concrete = observed("graph.incoming", 3.0);
+        concrete.entity.kind = "method".to_owned();
+        right.entities.push(concrete);
+
+        left.merge(right).expect("merge concrete kind");
+
+        assert_eq!(left.entities[0].entity.kind, "method");
     }
 }

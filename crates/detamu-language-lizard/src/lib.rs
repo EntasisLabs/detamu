@@ -145,10 +145,20 @@ fn parse_csv(
         .map(|artifact| (artifact.path.as_str(), artifact_language(artifact)))
         .collect::<BTreeMap<_, _>>();
     let records = csv_records(output)?;
-    let (headers, records) = records
+    let (first, remaining) = records
         .split_first()
         .ok_or_else(|| AnalyzerError::Failed("Lizard returned empty CSV output".to_owned()))?;
-    let columns = CsvColumns::from_headers(headers)?;
+    // Lizard's documented CSV layout is headerless, while some wrappers and
+    // older fixtures include a header row. Accept both without making the
+    // process adapter depend on a particular Lizard distribution.
+    let (columns, records) = if first
+        .first()
+        .is_some_and(|value| value.eq_ignore_ascii_case("NLOC"))
+    {
+        (CsvColumns::from_headers(first)?, remaining)
+    } else {
+        (CsvColumns::lizard_default(), records.as_slice())
+    };
     for record in records {
         let Some(row) = columns.parse(record, temporary)? else {
             continue;
@@ -158,10 +168,20 @@ fn parse_csv(
             .cloned()
             .flatten()
             .unwrap_or_else(|| LanguageId::new("unknown"));
-        let kind = if row.qualified_name.contains("::") || row.qualified_name.contains('.') {
+        // Lizard does not expose enough ownership information to distinguish
+        // Rust free functions from impl methods. The Rust Tree-sitter pack is
+        // authoritative for kind and will replace this unknown during merge.
+        let kind = if language.as_str() == "rust" {
+            NodeKind::Unknown
+        } else if row.qualified_name.contains("::") || row.qualified_name.contains('.') {
             NodeKind::Method
         } else {
             NodeKind::Function
+        };
+        let qualified_name = if language.as_str() == "rust" {
+            row.name.clone()
+        } else {
+            row.qualified_name
         };
         let id = acc_symbol_id(&row.path, &row.name, row.start);
         let mut observation = syntax_symbol_observation(
@@ -169,7 +189,7 @@ fn parse_csv(
             CodeSymbol {
                 id: id.clone(),
                 language,
-                qualified_name: row.qualified_name,
+                qualified_name,
                 kind,
             },
             SymbolLocation {
@@ -214,6 +234,19 @@ struct CsvColumns {
 }
 
 impl CsvColumns {
+    const fn lizard_default() -> Self {
+        Self {
+            nloc: 0,
+            complexity: 1,
+            parameters: 3,
+            file: 6,
+            function: 7,
+            long_name: 8,
+            start: 9,
+            end: 10,
+        }
+    }
+
     fn from_headers(headers: &[String]) -> Result<Self, AnalyzerError> {
         let index = |names: &[&str]| {
             headers
@@ -406,7 +439,7 @@ mod tests {
         )
         .expect("parse fixture");
         assert_eq!(batch.entities.len(), 1);
-        assert_eq!(batch.entities[0].entity.label, "Greeter::greet");
+        assert_eq!(batch.entities[0].entity.label, "greet");
         assert!((batch.entities[0].measurements[1].value - 3.0).abs() < f64::EPSILON);
         assert_eq!(
             batch.entities[0].measurements[1]
@@ -449,5 +482,37 @@ mod tests {
         assert_eq!(batch.entities.len(), 1);
         assert_eq!(batch.relations.len(), 1);
         assert_eq!(batch.entities[0].measurements.len(), 6);
+    }
+
+    #[test]
+    fn parses_headerless_lizard_csv() {
+        let temporary = Path::new("/tmp/lizard-fixture");
+        let csv = b"4,3,10,2,4,x,/tmp/lizard-fixture/src/lib.rs,greet,Greeter::greet(bool),4,7\n";
+        let mut attributes = BTreeMap::new();
+        attributes.insert("language".to_owned(), serde_json::json!("rust"));
+        let input = AnalysisInput {
+            snapshot: SnapshotId::new(
+                WorldId::new("code.repository:fixture"),
+                SnapshotVersion::new("abc"),
+            ),
+            sources: Vec::new(),
+            changed_entities: None,
+        };
+        let batch = parse_csv(
+            &input,
+            temporary,
+            &[Artifact {
+                path: "src/lib.rs".to_owned(),
+                content_id: "blob".to_owned(),
+                media_type: None,
+                attributes,
+            }],
+            csv,
+        )
+        .expect("parse headerless fixture");
+
+        assert_eq!(batch.entities.len(), 1);
+        assert_eq!(batch.entities[0].entity.label, "greet");
+        assert!((batch.entities[0].measurements[1].value - 3.0).abs() < f64::EPSILON);
     }
 }

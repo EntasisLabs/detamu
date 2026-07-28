@@ -24,8 +24,14 @@ pub enum DetamuError {
     Derivation(#[from] DerivationError),
     #[error(transparent)]
     Store(#[from] StoreError),
-    #[error("analyzer returned observations for a different snapshot")]
-    SnapshotMismatch,
+    #[error("{observer} returned observations for snapshot {actual:?}, expected {expected:?}")]
+    SnapshotMismatch {
+        observer: String,
+        expected: SnapshotId,
+        actual: SnapshotId,
+    },
+    #[error("{observer} emitted conflicting observations: {reason}")]
+    ObservationConflict { observer: String, reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,12 +97,19 @@ impl Detamu {
             };
             analyzers_run += 1;
             if observations.snapshot != input.snapshot {
-                return Err(DetamuError::SnapshotMismatch);
+                return Err(DetamuError::SnapshotMismatch {
+                    observer: descriptor.name,
+                    expected: input.snapshot.clone(),
+                    actual: observations.snapshot,
+                });
             }
             if let Some(batch) = &mut combined {
                 batch
                     .merge(observations)
-                    .map_err(|_| DetamuError::SnapshotMismatch)?;
+                    .map_err(|error| DetamuError::ObservationConflict {
+                        observer: descriptor.name,
+                        reason: error.to_string(),
+                    })?;
             } else {
                 combined = Some(observations);
             }
