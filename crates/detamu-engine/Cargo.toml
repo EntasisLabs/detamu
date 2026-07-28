@@ -14,8 +14,9 @@ path = "src/main.rs"
 [dependencies]
 detamu-sdk = { path = "../detamu-sdk" }
 detamu-store.workspace = true
+detamu-surreal = { path = "../detamu-surreal" }
 serde_json.workspace = true
+tokio.workspace = true
 
 [lints]
 workspace = true
-

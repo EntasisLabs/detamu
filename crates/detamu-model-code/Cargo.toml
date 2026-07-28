@@ -1,6 +1,6 @@
 [package]
-name = "detamu-core"
-description = "World-model-agnostic kernel types for Detamu"
+name = "detamu-model-code"
+description = "Code world model and AVEC scoring for Detamu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+detamu-core.workspace = true
+detamu-model.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

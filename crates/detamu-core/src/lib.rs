@@ -1,17 +1,16 @@
-//! Stable domain model for Detamu.
+//! Stable, world-model-agnostic kernel for Detamu.
 //!
-//! This crate intentionally knows nothing about databases, language servers,
+//! This crate intentionally knows nothing about code, tickets, databases,
 //! process hosting, or downstream consumers.
 
-mod avec;
 mod identity;
 mod observation;
 
-pub use avec::{
-    AutonomyWeights, AvecScores, AvecWeights, FrictionWeights, LogicWeights, StabilityWeights,
+pub use identity::{
+    EntityId, ModelId, RelationId, ScoreModelId, SnapshotId, SnapshotVersion, WorldId,
 };
-pub use identity::{GitOid, LanguageId, RepositoryId, RevisionId, SymbolId};
 pub use observation::{
-    AnalysisCoverage, AnalysisDiagnostic, AnalyzerProvenance, CodeSymbol, DependencyObservation,
-    DependencyType, DiagnosticSeverity, NodeKind, NodeMetrics, ObservationBatch, SymbolObservation,
+    AnalysisCoverage, AnalysisDiagnostic, Attributes, BatchMismatch, CommitMode,
+    DiagnosticSeverity, Entity, EntityObservation, Measurement, ObservationBatch,
+    ObserverProvenance, Relation, RelationObservation, Score,
 };

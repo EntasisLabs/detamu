@@ -1,6 +1,8 @@
+use detamu_core::{ModelId, ObservationBatch, Score, ScoreModelId};
+use detamu_model::{ScoringError, ScoringModel, ScoringModelDescriptor};
 use serde::{Deserialize, Serialize};
 
-use crate::NodeMetrics;
+use crate::{CODE_MODEL_ID, NodeMetrics};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AvecScores {
@@ -28,7 +30,6 @@ pub struct StabilityWeights {
     pub contributor_cap: f64,
     pub test_base_bias: f64,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LogicWeights {
     pub complexity: f64,
@@ -36,7 +37,6 @@ pub struct LogicWeights {
     pub lines_divisor: f64,
     pub parameter_cap: f64,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct FrictionWeights {
     pub structural: f64,
@@ -51,7 +51,6 @@ pub struct FrictionWeights {
     pub contributors_normalize: f64,
     pub complexity_normalize: f64,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AutonomyWeights {
     pub dependency_ratio: f64,
@@ -61,75 +60,59 @@ pub struct AutonomyWeights {
 
 impl AvecWeights {
     pub fn calculate(self, metrics: &NodeMetrics) -> AvecScores {
-        AvecScores {
-            stability: self.calculate_stability(metrics),
-            logic: self.calculate_logic(metrics),
-            friction: self.calculate_friction(metrics),
-            autonomy: self.calculate_autonomy(metrics),
-        }
-    }
-
-    fn calculate_stability(self, metrics: &NodeMetrics) -> f64 {
         let average_days = metrics.git_average_days_between_changes.max(1.0);
         let churn_factor = f64::from(metrics.git_total_commits) / average_days;
         let churn_penalty = (churn_factor / self.stability.churn_normalize).min(1.0);
         let contributor_penalty =
             (f64::from(metrics.git_contributors) / self.stability.contributor_cap).min(1.0);
         let test_bonus = f64::midpoint(metrics.test_line_coverage, metrics.test_branch_coverage);
-
-        clamp01(
+        let stability = clamp01(
             (1.0 - churn_penalty * self.stability.churn)
                 * (1.0 - contributor_penalty * self.stability.contributor)
                 * (self.stability.test_base_bias + test_bonus * self.stability.test),
-        )
-    }
+        );
 
-    fn calculate_logic(self, metrics: &NodeMetrics) -> f64 {
         let normalized_lines =
             (f64::from(metrics.lines_of_code) / self.logic.lines_divisor).max(1.0);
         let complexity_density = f64::from(metrics.cyclomatic_complexity) / normalized_lines;
         let parameter_weight = (f64::from(metrics.parameters) / self.logic.parameter_cap).min(1.0);
-
-        clamp01(
+        let logic = clamp01(
             complexity_density * self.logic.complexity + parameter_weight * self.logic.parameters,
-        )
-    }
+        );
 
-    fn calculate_friction(self, metrics: &NodeMetrics) -> f64 {
         let total_degree = metrics.total_degree().max(1);
         let centrality = f64::from(metrics.incoming_edges) / f64::from(total_degree);
         let dependency_load =
             (f64::from(metrics.incoming_edges) / self.friction.incoming_cap).min(1.0);
         let structural =
             centrality * self.friction.centrality + dependency_load * self.friction.dependency;
-
         let churn =
             (f64::from(metrics.git_total_commits) / self.friction.commits_normalize).min(1.0);
         let collaboration =
             (f64::from(metrics.git_contributors) / self.friction.contributors_normalize).min(1.0);
         let process = churn * self.friction.churn + collaboration * self.friction.collaboration;
-
         let cognitive = (f64::from(metrics.cyclomatic_complexity)
             / self.friction.complexity_normalize)
             .min(1.0);
-
-        clamp01(
+        let friction = clamp01(
             structural * self.friction.structural
                 + process * self.friction.process
                 + cognitive * self.friction.cognitive,
-        )
-    }
+        );
 
-    fn calculate_autonomy(self, metrics: &NodeMetrics) -> f64 {
-        let total_degree = metrics.total_degree().max(1);
         let dependency_ratio = f64::from(metrics.outgoing_edges) / f64::from(total_degree);
         let absolute_load =
             (f64::from(metrics.outgoing_edges) / self.autonomy.outgoing_cap).min(1.0);
-
-        clamp01(
+        let autonomy = clamp01(
             (1.0 - dependency_ratio) * self.autonomy.dependency_ratio
                 + (1.0 - absolute_load) * self.autonomy.absolute_count,
-        )
+        );
+        AvecScores {
+            stability,
+            logic,
+            friction,
+            autonomy,
+        }
     }
 }
 
@@ -173,6 +156,62 @@ impl Default for AvecWeights {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AvecCodeScorer {
+    pub weights: AvecWeights,
+}
+
+impl ScoringModel for AvecCodeScorer {
+    fn descriptor(&self) -> ScoringModelDescriptor {
+        ScoringModelDescriptor {
+            id: ScoreModelId::new("avec.code"),
+            version: self.weights.formula_version,
+            model: ModelId::new(CODE_MODEL_ID),
+            dimensions: vec![
+                "stability".to_owned(),
+                "logic".to_owned(),
+                "friction".to_owned(),
+                "autonomy".to_owned(),
+            ],
+        }
+    }
+
+    fn score(&self, batch: &mut ObservationBatch) -> Result<(), ScoringError> {
+        for observation in batch
+            .entities
+            .iter_mut()
+            .filter(|observation| observation.entity.model.as_str() == CODE_MODEL_ID)
+        {
+            let metrics =
+                NodeMetrics::from_measurements(&observation.measurements).ok_or_else(|| {
+                    ScoringError::Unsupported(format!(
+                        "entity {} lacks complete code metrics",
+                        observation.entity.id
+                    ))
+                })?;
+            let values = self.weights.calculate(&metrics);
+            observation
+                .scores
+                .retain(|score| score.model.as_str() != "avec.code");
+            observation.scores.extend([
+                score(self.weights.formula_version, "stability", values.stability),
+                score(self.weights.formula_version, "logic", values.logic),
+                score(self.weights.formula_version, "friction", values.friction),
+                score(self.weights.formula_version, "autonomy", values.autonomy),
+            ]);
+        }
+        Ok(())
+    }
+}
+
+fn score(version: u32, dimension: &str, value: f64) -> Score {
+    Score {
+        model: ScoreModelId::new("avec.code"),
+        version,
+        dimension: dimension.to_owned(),
+        value,
+    }
+}
 fn clamp01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
@@ -180,6 +219,39 @@ fn clamp01(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        CodeSymbol, GitOid, LanguageId, NodeKind, RepositoryId, RevisionId, SymbolId,
+        symbol_observation,
+    };
+    use detamu_model::ScoringModel;
+
+    #[test]
+    fn scores_code_without_teaching_the_kernel_about_avec() {
+        let revision = RevisionId::new(RepositoryId::new("repo"), GitOid::new("abc"));
+        let metrics = NodeMetrics {
+            outgoing_edges: 3,
+            ..NodeMetrics::default()
+        };
+        let mut batch = ObservationBatch::empty(revision.snapshot());
+        batch.entities.push(symbol_observation(
+            &revision,
+            CodeSymbol {
+                id: SymbolId::new("rust:run"),
+                language: LanguageId::new("rust"),
+                qualified_name: "run".to_owned(),
+                kind: NodeKind::Function,
+            },
+            "src/lib.rs",
+            1,
+            2,
+            None,
+            metrics,
+        ));
+        AvecCodeScorer::default()
+            .score(&mut batch)
+            .expect("score code");
+        assert_eq!(batch.entities[0].scores.len(), 4);
+    }
 
     #[test]
     fn every_dimension_is_normalized() {
@@ -195,7 +267,6 @@ mod tests {
             test_line_coverage: 2.0,
             test_branch_coverage: 2.0,
         };
-
         let scores = AvecWeights::default().calculate(&metrics);
         for score in [
             scores.stability,
@@ -216,7 +287,6 @@ mod tests {
             incoming_edges: 2,
             ..NodeMetrics::default()
         });
-
         assert!(isolated.autonomy > coupled.autonomy);
     }
 }

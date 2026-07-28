@@ -1,38 +1,43 @@
 # Detamu
 
-**A living reference model for codebases.**
+**A versioned world-model engine, beginning with code.**
 
-Detamu indexes code into a revision-aware semantic graph. It combines source
-structure, dependency relationships, Git history, complexity, and coverage into
-queryable observations and AVEC dimensional scores.
+Detamu turns observations from bounded worlds into immutable, queryable entity
+graphs with provenance, measurements, and versioned scores. Code is the first
+world model: Detamu will reproduce ACC's repository graph and AVEC behavior before
+expanding into pull requests, issues, tickets, notes, and projects.
 
-Detamu is designed to run in two forms:
-
-- as an embeddable Rust SDK;
-- as a standalone engine for editors, CI systems, agents, and other tools.
-
-The engine is a host around the SDK. It does not contain a second implementation.
+Detamu runs as either an embeddable Rust SDK or a standalone engine. The engine
+is a thin host around the SDK; it does not contain a second implementation.
 
 ## Status
 
-Detamu is in its initial Rust bootstrap. The workspace currently establishes:
+The current workspace establishes:
 
-- revision-aware domain types and AVEC scoring;
-- pluggable analyzer and language-pack contracts;
-- a storage interface with an in-memory reference implementation;
-- an embeddable SDK facade;
-- a thin standalone engine binary.
+- a world-model-agnostic kernel for snapshots, entities, relations, observations,
+  measurements, provenance, and scores;
+- model analyzer, scoring, and pack extension contracts;
+- a strongly typed code model containing Git identity, symbols, dependencies,
+  ACC metrics, and AVEC Code;
+- generic storage with an in-memory behavioral reference;
+- native SurrealDB and persistent SurrealKV storage with transactional bulk
+  snapshot replacement;
+- an embeddable orchestration SDK and thin standalone engine.
 
-Native SurrealDB persistence and the first language pack are the next milestones.
+The next milestone is the first code repository indexer, followed by ACC golden
+fixtures and deeper language analysis.
 
 ## Workspace
 
 | Crate | Responsibility |
 |---|---|
-| `detamu-core` | Domain types, observations, provenance, and AVEC |
-| `detamu-language` | Analyzer and language-pack extension contracts |
-| `detamu-store` | Storage contract and in-memory implementation |
-| `detamu-sdk` | Embeddable orchestration facade |
+| `detamu-core` | World-model-agnostic kernel types |
+| `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
+| `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
+| `detamu-language` | Language extensions within the code model |
+| `detamu-store` | Generic storage port and in-memory reference |
+| `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |
+| `detamu-sdk` | Model-agnostic orchestration facade |
 | `detamu-engine` | Standalone process and protocol host |
 
 ## Development
@@ -42,8 +47,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p detamu-engine -- doctor
+cargo run -p detamu-engine -- init ./data/detamu.surrealkv
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain
-stable as the implementation grows.
-
+stable as models and analyzers are added.

@@ -1,9 +1,9 @@
-//! Embeddable Detamu facade.
+//! Embeddable, world-model-agnostic Detamu orchestration facade.
 
 use std::sync::Arc;
 
-use detamu_core::{AnalysisCoverage, ObservationBatch, RevisionId};
-use detamu_language::{AnalysisInput, Analyzer, AnalyzerError};
+use detamu_core::{AnalysisCoverage, ObservationBatch, SnapshotId};
+use detamu_model::{AnalysisInput, AnalyzerError, ModelAnalyzer, ScoringError, ScoringModel};
 use detamu_store::{DetamuStore, StoreError};
 use thiserror::Error;
 
@@ -12,23 +12,27 @@ pub enum DetamuError {
     #[error(transparent)]
     Analyzer(#[from] AnalyzerError),
     #[error(transparent)]
+    Scoring(#[from] ScoringError),
+    #[error(transparent)]
     Store(#[from] StoreError),
-    #[error("analyzer returned observations for a different revision")]
-    RevisionMismatch,
+    #[error("analyzer returned observations for a different snapshot")]
+    SnapshotMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexReport {
-    pub revision: RevisionId,
+    pub snapshot: SnapshotId,
     pub analyzers_run: usize,
-    pub symbols: usize,
-    pub dependencies: usize,
+    pub scoring_models_run: usize,
+    pub entities: usize,
+    pub relations: usize,
     pub coverage: AnalysisCoverage,
 }
 
 pub struct Detamu {
     store: Arc<dyn DetamuStore>,
-    analyzers: Vec<Arc<dyn Analyzer>>,
+    analyzers: Vec<Arc<dyn ModelAnalyzer>>,
+    scoring_models: Vec<Arc<dyn ScoringModel>>,
 }
 
 impl Detamu {
@@ -36,50 +40,55 @@ impl Detamu {
         DetamuBuilder {
             store,
             analyzers: Vec::new(),
+            scoring_models: Vec::new(),
         }
     }
 
-    /// Runs every registered analyzer and persists their combined observations.
+    /// Runs every registered observer and scorer, then atomically persists the
+    /// combined snapshot.
     ///
     /// # Errors
     ///
-    /// Returns an error when an analyzer fails, emits a mismatched revision, or
-    /// the configured store cannot commit the observation batch.
+    /// Returns an error when observation, scoring, or persistence fails.
     pub async fn index(&self, input: AnalysisInput) -> Result<IndexReport, DetamuError> {
         let mut combined: Option<ObservationBatch> = None;
 
         for analyzer in &self.analyzers {
             let observations = analyzer.analyze(&input).await?;
+            if observations.snapshot != input.snapshot {
+                return Err(DetamuError::SnapshotMismatch);
+            }
             if let Some(batch) = &mut combined {
                 batch
                     .merge(observations)
-                    .map_err(|_| DetamuError::RevisionMismatch)?;
-            } else if observations.revision == input.revision {
-                combined = Some(observations);
+                    .map_err(|_| DetamuError::SnapshotMismatch)?;
             } else {
-                return Err(DetamuError::RevisionMismatch);
+                combined = Some(observations);
             }
         }
 
-        let combined = combined.unwrap_or_else(|| ObservationBatch::empty(input.revision));
+        let mut combined = combined.unwrap_or_else(|| ObservationBatch::empty(input.snapshot));
+        for scoring_model in &self.scoring_models {
+            scoring_model.score(&mut combined)?;
+        }
 
         let report = IndexReport {
-            revision: combined.revision.clone(),
+            snapshot: combined.snapshot.clone(),
             analyzers_run: self.analyzers.len(),
-            symbols: combined.symbols.len(),
-            dependencies: combined.dependencies.len(),
+            scoring_models_run: self.scoring_models.len(),
+            entities: combined.entities.len(),
+            relations: combined.relations.len(),
             coverage: combined.coverage,
         };
         self.store.ingest(combined).await?;
         Ok(report)
     }
 
-    /// Persists an observation batch supplied by an external indexing pipeline.
+    /// Persists a normalized batch supplied by an external model pipeline.
     ///
     /// # Errors
     ///
-    /// Returns an error when the configured store rejects or cannot persist the
-    /// batch.
+    /// Returns an error when the configured store rejects or cannot commit the batch.
     pub async fn ingest(&self, batch: ObservationBatch) -> Result<(), DetamuError> {
         self.store.ingest(batch).await?;
         Ok(())
@@ -92,13 +101,20 @@ impl Detamu {
 
 pub struct DetamuBuilder {
     store: Arc<dyn DetamuStore>,
-    analyzers: Vec<Arc<dyn Analyzer>>,
+    analyzers: Vec<Arc<dyn ModelAnalyzer>>,
+    scoring_models: Vec<Arc<dyn ScoringModel>>,
 }
 
 impl DetamuBuilder {
     #[must_use]
-    pub fn analyzer(mut self, analyzer: Arc<dyn Analyzer>) -> Self {
+    pub fn analyzer(mut self, analyzer: Arc<dyn ModelAnalyzer>) -> Self {
         self.analyzers.push(analyzer);
+        self
+    }
+
+    #[must_use]
+    pub fn scoring_model(mut self, scoring_model: Arc<dyn ScoringModel>) -> Self {
+        self.scoring_models.push(scoring_model);
         self
     }
 
@@ -106,63 +122,78 @@ impl DetamuBuilder {
         Detamu {
             store: self.store,
             analyzers: self.analyzers,
+            scoring_models: self.scoring_models,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use async_trait::async_trait;
-    use detamu_core::{GitOid, LanguageId, RepositoryId};
-    use detamu_language::{AnalyzerCapability, AnalyzerDescriptor};
+    use detamu_core::{ModelId, ScoreModelId, SnapshotVersion, WorldId};
+    use detamu_model::{AnalyzerDescriptor, ScoringModelDescriptor, SourceReference};
     use detamu_store::InMemoryStore;
 
     use super::*;
 
     struct EmptyAnalyzer;
+    struct EmptyScorer;
 
     #[async_trait]
-    impl Analyzer for EmptyAnalyzer {
+    impl ModelAnalyzer for EmptyAnalyzer {
         fn descriptor(&self) -> AnalyzerDescriptor {
             AnalyzerDescriptor {
                 name: "empty".to_owned(),
                 version: "1".to_owned(),
-                capabilities: vec![AnalyzerCapability::Symbols],
+                model: ModelId::new("code"),
+                capabilities: vec!["symbols".to_owned()],
             }
         }
 
-        fn supports(&self, _language: &LanguageId) -> bool {
-            true
-        }
-
         async fn analyze(&self, input: &AnalysisInput) -> Result<ObservationBatch, AnalyzerError> {
-            let mut batch = ObservationBatch::empty(input.revision.clone());
+            let mut batch = ObservationBatch::empty(input.snapshot.clone());
             batch.coverage = AnalysisCoverage::Complete;
             Ok(batch)
         }
     }
 
+    impl ScoringModel for EmptyScorer {
+        fn descriptor(&self) -> ScoringModelDescriptor {
+            ScoringModelDescriptor {
+                id: ScoreModelId::new("test.score"),
+                version: 1,
+                model: ModelId::new("test"),
+                dimensions: Vec::new(),
+            }
+        }
+
+        fn score(&self, _batch: &mut ObservationBatch) -> Result<(), ScoringError> {
+            Ok(())
+        }
+    }
+
     #[tokio::test]
-    async fn embedded_sdk_runs_registered_analyzers() {
+    async fn embedded_sdk_runs_registered_model_extensions() {
         let store = Arc::new(InMemoryStore::default());
         let detamu = Detamu::builder(store)
             .analyzer(Arc::new(EmptyAnalyzer))
+            .scoring_model(Arc::new(EmptyScorer))
             .build();
-        let revision = RevisionId::new(RepositoryId::new("repo"), GitOid::new("abc123"));
-
+        let snapshot = SnapshotId::new(
+            WorldId::new("code.repository:repo"),
+            SnapshotVersion::new("abc123"),
+        );
         let report = detamu
             .index(AnalysisInput {
-                repository_path: PathBuf::from("."),
-                revision: revision.clone(),
-                changed_files: None,
+                snapshot: snapshot.clone(),
+                sources: Vec::<SourceReference>::new(),
+                changed_entities: None,
             })
             .await
-            .expect("index should succeed");
-
-        assert_eq!(report.revision, revision);
+            .expect("index");
+        assert_eq!(report.snapshot, snapshot);
         assert_eq!(report.analyzers_run, 1);
+        assert_eq!(report.scoring_models_run, 1);
         assert_eq!(report.coverage, AnalysisCoverage::Complete);
     }
 }

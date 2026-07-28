@@ -1,6 +1,6 @@
 [package]
 name = "detamu-language"
-description = "Analyzer and language-pack extension contracts for Detamu"
+description = "Code-language extension contracts for Detamu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,10 +8,8 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-async-trait.workspace = true
-detamu-core.workspace = true
-thiserror.workspace = true
+detamu-model.workspace = true
+detamu-model-code.workspace = true
 
 [lints]
 workspace = true
-

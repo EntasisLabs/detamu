@@ -1,6 +1,6 @@
 [package]
-name = "detamu-sdk"
-description = "Embeddable world-model orchestration SDK for Detamu"
+name = "detamu-surreal"
+description = "Native SurrealDB storage backend for Detamu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,13 +8,17 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 detamu-core.workspace = true
-detamu-model.workspace = true
 detamu-store.workspace = true
+serde_json.workspace = true
+surrealdb.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
+detamu-model.workspace = true
+detamu-model-code.workspace = true
+tempfile = "3"
 tokio.workspace = true
 
 [lints]

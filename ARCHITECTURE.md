@@ -2,64 +2,115 @@
 
 ## Product boundary
 
-Detamu observes and models code. It does not own an editor, an agent runtime, a
-work lifecycle, or a review decision.
+Detamu is a versioned world-model engine. It observes bounded worlds, reconciles
+evidence into immutable snapshots, derives relations and scores, and exposes the
+result for queries and impact analysis.
 
-The core flow is:
+Detamu does not own an agent runtime, user conversation, work lifecycle,
+provider authority, or review decision. Medousa and other consumers remain
+authoritative for their users and workflows.
 
-```text
-repository revision
-  -> registered analyzers
-  -> normalized observation batch
-  -> AVEC calculation
-  -> store
-  -> graph and impact queries
-```
+Code is the first world model and ACC compatibility is its behavioral target. It
+is not Detamu's universal ontology.
 
-Every persisted observation is bound to a repository and immutable Git revision.
-Branches are useful input labels, but they are not durable analysis identities.
+## Kernel vocabulary
+
+The world-model-agnostic kernel contains:
+
+- `WorldId`: a bounded modeled environment;
+- `SnapshotId`: a world plus an immutable source/version identity;
+- entities and typed relations;
+- observations, measurements, provenance, coverage, and diagnostics;
+- versioned, normalized scores;
+- explicit commit semantics.
+
+Domain meaning belongs to a world-model pack. The code pack owns repositories,
+Git revisions, symbols, dependencies, code metrics, language support, and AVEC.
+Future packs may model pull requests, tickets, notes, projects, or other worlds
+without changing the kernel.
 
 ## Dependency direction
 
 ```text
-detamu-core
-  ^       ^
-  |       |
-language  store
-   \       /
-    detamu-sdk
-        ^
-        |
-  detamu-engine
+                detamu-core
+                  ^     ^
+                  |     |
+          detamu-model  detamu-store
+             ^   ^          ^
+             |   |          |
+ model-code /    |      detamu-surreal
+      ^           \        /
+ detamu-language   detamu-sdk
+                        ^
+                        |
+                  detamu-engine
 ```
 
-`detamu-core` must not depend on a database, process host, LSP implementation, or
-consumer such as Medousa. The standalone engine must remain a thin host around
-the SDK.
+`detamu-core` must not depend on a database, code vocabulary, provider SDK,
+process host, or consumer. `detamu-sdk` orchestrates model analyzers and scoring
+models without branching on domain. The standalone engine remains a thin host
+around the SDK.
 
-## Extension model
+## Hexagonal ports
 
-Analyzers emit a normalized `ObservationBatch`. A language pack is a discoverable
-bundle of analyzers; LSP is one possible analyzer source rather than the language
-abstraction itself. Packs may combine LSP, tree-sitter, build-system metadata,
-coverage files, or external complexity engines.
+Inbound ports are the Rust SDK and standalone engine protocols. Outbound ports
+are model analyzers, scoring models, storage, and eventually source synchronization
+and event publication.
 
-Incomplete analysis is represented explicitly through coverage status and
-diagnostics. Missing capabilities must never be silently interpreted as zero risk.
+A `WorldModelPack` declares its model schema, analyzers, and scoring models.
+Packs are compile-time registered until multiple real models demonstrate the
+requirements for a stable dynamic plugin ABI.
+
+## Observation and scoring flow
+
+```text
+world sources
+  -> model analyzers
+  -> normalized observation batches
+  -> reconciliation / merge
+  -> model scoring
+  -> atomic snapshot commit
+  -> graph, comparison, and impact queries
+```
+
+Incomplete analysis is represented explicitly through coverage and diagnostics.
+Missing capabilities must never be interpreted as zero risk. Measurements are
+source evidence; scores are derived and carry a scoring-model identity and
+formula version.
+
+## Commit semantics
+
+Every batch declares its commit mode. The first implemented mode is
+`ReplaceSnapshot`: atomically replace one complete immutable snapshot. Repeating
+the same batch is idempotent and removes observations omitted by a later batch.
+
+Delta synchronization and append-only facts will be added as explicit modes when
+a mutable work-system source is implemented. They must not be inferred from an
+incomplete batch.
 
 ## Storage
 
-The store contract is intentionally independent of SurrealDB. SurrealDB is the
-first-class production backend; the in-memory implementation provides fast tests
-and an executable specification for backend behavior.
+The store contract is independent of SurrealDB. SurrealDB is the first-class
+production backend; the in-memory implementation is the behavioral reference.
 
-Indexing backends should favor staged bulk writes and explicit index commits over
-per-edge database events. AVEC is deterministic domain logic and is calculated in
-Rust.
+Surreal persists generic snapshots, entity observations, and relation
+observations. Common identity, model, kind, label, and endpoint fields are
+indexed; versioned model payloads preserve typed domain attributes. World-model
+specific tables or indexes may be added as projections, but cannot become kernel
+requirements.
 
-## Consumer integration
+Bulk writes and the snapshot marker occur in one transaction. Readers observe
+either the previous complete snapshot or the new one, never an intermediate
+graph.
 
-Consumers embed `detamu-sdk` or communicate with `detamu-engine`. A consumer may
-attach a Detamu impact report to its own evidence or lifecycle, but Detamu does
-not become authoritative for that lifecycle.
+## Code-first roadmap
 
+1. Keep the generic seams stable.
+2. Port ACC behavior into `detamu-model-code`.
+3. Build repository and language analyzers against the model contracts.
+4. Verify formulas and graph output with C# ACC golden fixtures.
+5. Prove the architecture with a second pack for GitHub issues and pull requests.
+
+Cross-domain links such as `ticket -> implemented_by -> pull request -> modifies
+-> code symbol` belong to model packs and reconciliation rules, not special cases
+inside the orchestration engine.

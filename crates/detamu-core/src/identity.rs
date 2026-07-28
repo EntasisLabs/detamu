@@ -38,22 +38,24 @@ macro_rules! string_id {
     };
 }
 
-string_id!(RepositoryId);
-string_id!(GitOid);
-string_id!(SymbolId);
-string_id!(LanguageId);
+string_id!(WorldId);
+string_id!(SnapshotVersion);
+string_id!(ModelId);
+string_id!(EntityId);
+string_id!(RelationId);
+string_id!(ScoreModelId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct RevisionId {
-    pub repository: RepositoryId,
-    pub commit: GitOid,
+pub struct SnapshotId {
+    pub world: WorldId,
+    pub version: SnapshotVersion,
 }
 
-impl RevisionId {
-    pub fn new(repository: impl Into<RepositoryId>, commit: impl Into<GitOid>) -> Self {
+impl SnapshotId {
+    pub fn new(world: impl Into<WorldId>, version: impl Into<SnapshotVersion>) -> Self {
         Self {
-            repository: repository.into(),
-            commit: commit.into(),
+            world: world.into(),
+            version: version.into(),
         }
     }
 }

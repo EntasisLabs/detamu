@@ -1,90 +1,68 @@
-use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
-use crate::{AvecScores, LanguageId, RevisionId, SymbolId};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::{EntityId, ModelId, RelationId, ScoreModelId, SnapshotId};
+
+pub type Attributes = BTreeMap<String, Value>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AnalyzerProvenance {
-    pub analyzer: String,
+pub struct ObserverProvenance {
+    pub observer: String,
     pub version: String,
     pub configuration_digest: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeKind {
-    Module,
-    Namespace,
-    Type,
-    Trait,
-    Interface,
-    Function,
-    Method,
-    Field,
-    Constant,
-    Unknown,
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CodeSymbol {
-    pub id: SymbolId,
-    pub language: LanguageId,
-    pub qualified_name: String,
-    pub kind: NodeKind,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
-pub struct NodeMetrics {
-    pub lines_of_code: u32,
-    pub cyclomatic_complexity: u32,
-    pub parameters: u32,
-    pub incoming_edges: u32,
-    pub outgoing_edges: u32,
-    pub git_total_commits: u32,
-    pub git_contributors: u32,
-    pub git_average_days_between_changes: f64,
-    /// Normalized to `0.0..=1.0`.
-    pub test_line_coverage: f64,
-    /// Normalized to `0.0..=1.0`.
-    pub test_branch_coverage: f64,
-}
-
-impl NodeMetrics {
-    pub fn total_degree(self) -> u32 {
-        self.incoming_edges.saturating_add(self.outgoing_edges)
-    }
+pub struct Entity {
+    pub id: EntityId,
+    pub model: ModelId,
+    pub kind: String,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SymbolObservation {
-    pub revision: RevisionId,
-    pub symbol: CodeSymbol,
-    pub file_path: String,
-    pub line_start: u32,
-    pub line_end: u32,
-    pub signature: Option<String>,
-    pub metrics: NodeMetrics,
-    pub avec: AvecScores,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DependencyType {
-    Calls,
-    Imports,
-    References,
-    Implements,
-    Inherits,
-    Contains,
-    Other(String),
+pub struct Measurement {
+    pub name: String,
+    pub value: f64,
+    pub unit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DependencyObservation {
-    pub revision: RevisionId,
-    pub from: SymbolId,
-    pub to: SymbolId,
-    pub relationship: DependencyType,
+pub struct Score {
+    pub model: ScoreModelId,
+    pub version: u32,
+    pub dimension: String,
+    /// Normalized to `0.0..=1.0`.
+    pub value: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityObservation {
+    pub snapshot: SnapshotId,
+    pub entity: Entity,
+    pub attributes: Attributes,
+    pub measurements: Vec<Measurement>,
+    pub scores: Vec<Score>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Relation {
+    pub id: RelationId,
+    pub model: ModelId,
+    pub kind: String,
+    pub from: EntityId,
+    pub to: EntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RelationObservation {
+    pub snapshot: SnapshotId,
+    pub relation: Relation,
     pub weight: f64,
+    pub attributes: Attributes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,47 +84,56 @@ pub enum DiagnosticSeverity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisDiagnostic {
     pub severity: DiagnosticSeverity,
-    pub analyzer: String,
+    pub observer: String,
     pub message: String,
-    pub file_path: Option<String>,
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitMode {
+    /// Atomically replace the complete contents of one immutable snapshot.
+    ReplaceSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ObservationBatch {
-    pub revision: RevisionId,
-    pub provenance: Vec<AnalyzerProvenance>,
+    pub snapshot: SnapshotId,
+    pub commit_mode: CommitMode,
+    pub provenance: Vec<ObserverProvenance>,
     pub coverage: AnalysisCoverage,
-    pub symbols: Vec<SymbolObservation>,
-    pub dependencies: Vec<DependencyObservation>,
+    pub entities: Vec<EntityObservation>,
+    pub relations: Vec<RelationObservation>,
     pub diagnostics: Vec<AnalysisDiagnostic>,
 }
 
 impl ObservationBatch {
-    pub fn empty(revision: RevisionId) -> Self {
+    pub fn empty(snapshot: SnapshotId) -> Self {
         Self {
-            revision,
+            snapshot,
+            commit_mode: CommitMode::ReplaceSnapshot,
             provenance: Vec::new(),
             coverage: AnalysisCoverage::Unavailable,
-            symbols: Vec::new(),
-            dependencies: Vec::new(),
+            entities: Vec::new(),
+            relations: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
 
-    /// Adds observations from another analyzer to this batch.
+    /// Adds observations from another observer to this batch.
     ///
     /// # Errors
     ///
-    /// Returns [`RevisionMismatch`] when the batches describe different
-    /// repository revisions.
-    pub fn merge(&mut self, mut other: Self) -> Result<(), RevisionMismatch> {
-        if self.revision != other.revision {
-            return Err(RevisionMismatch);
+    /// Returns [`BatchMismatch`] when the batches describe different snapshots
+    /// or use different commit semantics.
+    pub fn merge(&mut self, mut other: Self) -> Result<(), BatchMismatch> {
+        if self.snapshot != other.snapshot || self.commit_mode != other.commit_mode {
+            return Err(BatchMismatch);
         }
 
         self.provenance.append(&mut other.provenance);
-        self.symbols.append(&mut other.symbols);
-        self.dependencies.append(&mut other.dependencies);
+        self.entities.append(&mut other.entities);
+        self.relations.append(&mut other.relations);
         self.diagnostics.append(&mut other.diagnostics);
         self.coverage = merge_coverage(self.coverage, other.coverage);
         Ok(())
@@ -154,7 +141,7 @@ impl ObservationBatch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RevisionMismatch;
+pub struct BatchMismatch;
 
 fn merge_coverage(left: AnalysisCoverage, right: AnalysisCoverage) -> AnalysisCoverage {
     use AnalysisCoverage::{Complete, Partial, Unavailable};
