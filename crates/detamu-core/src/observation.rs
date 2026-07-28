@@ -132,12 +132,80 @@ impl ObservationBatch {
         }
 
         self.provenance.append(&mut other.provenance);
-        self.entities.append(&mut other.entities);
-        self.relations.append(&mut other.relations);
+        for observation in other.entities {
+            if let Some(existing) = self
+                .entities
+                .iter_mut()
+                .find(|existing| existing.entity.id == observation.entity.id)
+            {
+                merge_entity(existing, observation)?;
+            } else {
+                self.entities.push(observation);
+            }
+        }
+        for observation in other.relations {
+            if let Some(existing) = self
+                .relations
+                .iter()
+                .find(|existing| existing.relation.id == observation.relation.id)
+            {
+                if existing != &observation {
+                    return Err(BatchMismatch);
+                }
+            } else {
+                self.relations.push(observation);
+            }
+        }
         self.diagnostics.append(&mut other.diagnostics);
         self.coverage = merge_coverage(self.coverage, other.coverage);
         Ok(())
     }
+}
+
+fn merge_entity(
+    existing: &mut EntityObservation,
+    incoming: EntityObservation,
+) -> Result<(), BatchMismatch> {
+    if existing.snapshot != incoming.snapshot || existing.entity != incoming.entity {
+        return Err(BatchMismatch);
+    }
+    for (name, value) in incoming.attributes {
+        if existing
+            .attributes
+            .get(&name)
+            .is_some_and(|current| current != &value)
+        {
+            return Err(BatchMismatch);
+        }
+        existing.attributes.insert(name, value);
+    }
+    for measurement in incoming.measurements {
+        if let Some(current) = existing
+            .measurements
+            .iter()
+            .find(|current| current.name == measurement.name)
+        {
+            if current != &measurement {
+                return Err(BatchMismatch);
+            }
+        } else {
+            existing.measurements.push(measurement);
+        }
+    }
+    for score in incoming.scores {
+        if let Some(current) = existing.scores.iter().find(|current| {
+            current.model == score.model
+                && current.version == score.version
+                && current.dimension == score.dimension
+        }) {
+            if current != &score {
+                return Err(BatchMismatch);
+            }
+        } else {
+            existing.scores.push(score);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -150,5 +218,53 @@ fn merge_coverage(left: AnalysisCoverage, right: AnalysisCoverage) -> AnalysisCo
         (Unavailable, Unavailable) => Unavailable,
         (Complete, Complete) => Complete,
         _ => Partial,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{SnapshotVersion, WorldId};
+
+    fn observed(name: &str, value: f64) -> EntityObservation {
+        let snapshot = SnapshotId::new(WorldId::new("world"), SnapshotVersion::new("v1"));
+        EntityObservation {
+            snapshot,
+            entity: Entity {
+                id: EntityId::new("entity"),
+                model: ModelId::new("model"),
+                kind: "item".to_owned(),
+                label: "Item".to_owned(),
+            },
+            attributes: Attributes::new(),
+            measurements: vec![Measurement {
+                name: name.to_owned(),
+                value,
+                unit: None,
+            }],
+            scores: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn merge_enriches_the_same_entity() {
+        let snapshot = SnapshotId::new(WorldId::new("world"), SnapshotVersion::new("v1"));
+        let mut left = ObservationBatch::empty(snapshot.clone());
+        left.entities.push(observed("syntax.complexity", 2.0));
+        let mut right = ObservationBatch::empty(snapshot);
+        right.entities.push(observed("graph.incoming", 3.0));
+        left.merge(right).expect("merge enrichment");
+        assert_eq!(left.entities.len(), 1);
+        assert_eq!(left.entities[0].measurements.len(), 2);
+    }
+
+    #[test]
+    fn merge_rejects_conflicting_evidence() {
+        let snapshot = SnapshotId::new(WorldId::new("world"), SnapshotVersion::new("v1"));
+        let mut left = ObservationBatch::empty(snapshot.clone());
+        left.entities.push(observed("syntax.complexity", 2.0));
+        let mut right = ObservationBatch::empty(snapshot);
+        right.entities.push(observed("syntax.complexity", 3.0));
+        assert!(left.merge(right).is_err());
     }
 }

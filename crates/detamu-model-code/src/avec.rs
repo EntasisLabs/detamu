@@ -180,13 +180,9 @@ impl ScoringModel for AvecCodeScorer {
         for observation in batch.entities.iter_mut().filter(|observation| {
             observation.entity.model.as_str() == CODE_MODEL_ID && observation.entity.kind != "file"
         }) {
-            let metrics =
-                NodeMetrics::from_measurements(&observation.measurements).ok_or_else(|| {
-                    ScoringError::Unsupported(format!(
-                        "entity {} lacks complete code metrics",
-                        observation.entity.id
-                    ))
-                })?;
+            let Some(metrics) = NodeMetrics::from_measurements(&observation.measurements) else {
+                continue;
+            };
             let values = self.weights.calculate(&metrics);
             observation
                 .scores

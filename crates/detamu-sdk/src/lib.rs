@@ -133,6 +133,15 @@ impl DetamuBuilder {
     }
 
     #[must_use]
+    pub fn analyzers(
+        mut self,
+        analyzers: impl IntoIterator<Item = Arc<dyn ModelAnalyzer>>,
+    ) -> Self {
+        self.analyzers.extend(analyzers);
+        self
+    }
+
+    #[must_use]
     pub fn scoring_model(mut self, scoring_model: Arc<dyn ScoringModel>) -> Self {
         self.scoring_models.push(scoring_model);
         self

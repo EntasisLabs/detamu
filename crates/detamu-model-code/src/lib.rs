@@ -5,7 +5,7 @@
 
 mod avec;
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt::Write as _};
 
 use detamu_core::{
     Attributes, Entity, EntityId, EntityObservation, Measurement, ModelId, Relation, RelationId,
@@ -14,6 +14,7 @@ use detamu_core::{
 use detamu_model::{ModelAnalyzer, ModelDescriptor, ScoringModel, WorldModelPack};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 pub use avec::{
     AutonomyWeights, AvecCodeScorer, AvecScores, AvecWeights, FrictionWeights, LogicWeights,
@@ -217,6 +218,21 @@ pub struct CodeSymbol {
     pub kind: NodeKind,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyntaxMetrics {
+    pub lines_of_code: u32,
+    pub cyclomatic_complexity: u32,
+    pub parameters: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolLocation<'a> {
+    pub file_path: &'a str,
+    pub line_start: u32,
+    pub line_end: u32,
+    pub signature: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct NodeMetrics {
     pub lines_of_code: u32,
@@ -266,6 +282,82 @@ pub struct FileHistory {
     pub average_days_between_changes: f64,
     pub recent_commits: u32,
     pub recent_frequency: RecentFrequency,
+}
+
+pub fn acc_symbol_id(path: &str, name: &str, line_start: u32) -> SymbolId {
+    let identity = format!("{path}:{name}:{line_start}").to_lowercase();
+    let digest = Sha256::digest(identity.as_bytes());
+    let mut hash = String::with_capacity(32);
+    for byte in &digest[..16] {
+        write!(hash, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    SymbolId::new(format!("node_{hash}"))
+}
+
+pub fn syntax_symbol_observation(
+    revision: &RevisionId,
+    symbol: CodeSymbol,
+    location: SymbolLocation<'_>,
+    metrics: SyntaxMetrics,
+    history: Option<&FileHistory>,
+) -> EntityObservation {
+    let mut attributes = BTreeMap::new();
+    attributes.insert("language".to_owned(), json!(symbol.language.as_str()));
+    attributes.insert("qualified_name".to_owned(), json!(symbol.qualified_name));
+    attributes.insert("file_path".to_owned(), json!(location.file_path));
+    attributes.insert("line_start".to_owned(), json!(location.line_start));
+    attributes.insert("line_end".to_owned(), json!(location.line_end));
+    attributes.insert("signature".to_owned(), json!(location.signature));
+    let mut measurements = vec![
+        measurement("code.lines_of_code", metrics.lines_of_code),
+        measurement("code.cyclomatic_complexity", metrics.cyclomatic_complexity),
+        measurement("code.parameters", metrics.parameters),
+    ];
+    if let Some(history) = history {
+        measurements.extend([
+            measurement("git.total_commits", history.total_commits),
+            measurement("git.contributors", history.contributors),
+            measurement("git.recent_commits", history.recent_commits),
+            Measurement {
+                name: "git.average_days_between_changes".to_owned(),
+                value: history.average_days_between_changes,
+                unit: Some("days".to_owned()),
+            },
+        ]);
+    }
+    EntityObservation {
+        snapshot: revision.snapshot(),
+        entity: Entity {
+            id: EntityId::new(symbol.id.as_str()),
+            model: ModelId::new(CODE_MODEL_ID),
+            kind: symbol.kind.as_str().to_owned(),
+            label: symbol.qualified_name,
+        },
+        attributes,
+        measurements,
+        scores: Vec::new(),
+    }
+}
+
+pub fn file_contains_symbol(
+    revision: &RevisionId,
+    file_path: &str,
+    symbol: &SymbolId,
+) -> RelationObservation {
+    let file = EntityId::new(format!("file:{file_path}"));
+    let symbol = EntityId::new(symbol.as_str());
+    RelationObservation {
+        snapshot: revision.snapshot(),
+        relation: Relation {
+            id: RelationId::new(format!("contains:{file_path}:{}", symbol.as_str())),
+            model: ModelId::new(CODE_MODEL_ID),
+            kind: "contains".to_owned(),
+            from: file,
+            to: symbol,
+        },
+        weight: 1.0,
+        attributes: Attributes::new(),
+    }
 }
 
 impl NodeMetrics {

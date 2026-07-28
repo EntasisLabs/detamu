@@ -65,6 +65,17 @@ requirements for a stable dynamic plugin ABI.
 immutable Detamu snapshot plus analyzer input. A source may expose mutable labels
 such as branches, but snapshot identity must use an immutable source version.
 
+`ArtifactReader` exposes content-addressed artifacts at that immutable source
+version. Language analyzers depend on this port rather than Git or the mutable
+filesystem. The Git implementation uses one `cat-file --batch` process to read
+all requested blobs and verifies every returned object identity.
+
+Observers may enrich the same entity. Batch reconciliation merges non-conflicting
+attributes, measurements, and scores by stable entity identity, deduplicates
+identical relations, and rejects conflicting evidence. Domain-specific conflict
+resolution remains a future model-pack concern; the kernel never picks a winner
+silently.
+
 ## Git code source
 
 `detamu-source-git` is the first source adapter. It:
@@ -89,6 +100,24 @@ Recent activity uses ACC's 90-day and 0–2/3–9/10+ thresholds, but the window
 anchored to the snapshot commit's author time rather than wall-clock time. This
 makes observations reproducible. Average change intervals use consecutive
 observed commit times; negative author-date movement is clamped to zero.
+
+## Rust language pack
+
+`detamu-language-rust` parses committed Rust blobs with Tree-sitter. Its first
+analyzer emits structs, enums, unions, type aliases, traits, modules, functions,
+trait methods, and impl methods. It produces:
+
+- ACC-compatible SHA-256 location identities (`path:name:line`, first 16 bytes);
+- one-based source ranges and qualified names;
+- source signatures, LOC, parameter counts, and syntax complexity;
+- inherited file-history evidence;
+- `file -> contains -> symbol` relations.
+
+Syntax complexity version `syntax-metrics-v1` starts functions at one and counts
+branching and loop constructs, match arms, try expressions, and boolean decision
+expressions. It is deterministic but not yet claimed to be byte-for-byte Lizard
+parity. Missing graph and coverage evidence remains absent, so AVEC scoring skips
+those entities until the required measurements exist.
 
 ## Observation and scoring flow
 
@@ -136,9 +165,10 @@ graph.
 
 1. Keep the generic seams stable.
 2. Port ACC behavior into `detamu-model-code`.
-3. Build symbol and dependency analyzers against the model contracts.
+3. Add Rust dependency extraction and graph-derived measurements.
 4. Verify formulas and graph output with C# ACC golden fixtures.
-5. Prove the architecture with a second pack for GitHub issues and pull requests.
+5. Add language packs against the same artifact and analyzer ports.
+6. Prove the architecture with a second pack for GitHub issues and pull requests.
 
 Cross-domain links such as `ticket -> implemented_by -> pull request -> modifies
 -> code symbol` belong to model packs and reconciliation rules, not special cases

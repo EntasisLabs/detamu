@@ -1,0 +1,25 @@
+[package]
+name = "detamu-language-rust"
+description = "Rust symbol and complexity analyzer for the Detamu code model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+detamu-core.workspace = true
+detamu-language.workspace = true
+detamu-model.workspace = true
+detamu-model-code.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tree-sitter.workspace = true
+tree-sitter-rust.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+
+[lints]
+workspace = true

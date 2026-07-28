@@ -3,6 +3,7 @@ members = [
     "crates/detamu-core",
     "crates/detamu-engine",
     "crates/detamu-language",
+    "crates/detamu-language-rust",
     "crates/detamu-model",
     "crates/detamu-model-code",
     "crates/detamu-sdk",
@@ -23,6 +24,7 @@ rust-version = "1.89"
 async-trait = "0.1"
 detamu-core = { path = "crates/detamu-core" }
 detamu-language = { path = "crates/detamu-language" }
+detamu-language-rust = { path = "crates/detamu-language-rust" }
 detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
 detamu-source-git = { path = "crates/detamu-source-git" }
@@ -32,7 +34,9 @@ serde_json = "1"
 sha2 = "0.10"
 surrealdb = { version = "3", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tree-sitter = "0.26.11"
+tree-sitter-rust = "0.24.2"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

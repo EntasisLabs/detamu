@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 detamu-model.workspace = true
 detamu-model-code.workspace = true
+detamu-language-rust.workspace = true
+detamu-language.workspace = true
 detamu-sdk = { path = "../detamu-sdk" }
 detamu-source-git.workspace = true
 detamu-store.workspace = true

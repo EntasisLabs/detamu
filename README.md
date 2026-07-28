@@ -23,13 +23,15 @@ The current workspace establishes:
   tracked-file language inventory;
 - rename-aware bulk Git history with contributor, churn, timing, and recent
   frequency evidence anchored to each snapshot;
+- immutable artifact access and a Tree-sitter Rust pack producing types,
+  functions, methods, syntax metrics, and containment relations;
 - generic storage with an in-memory behavioral reference;
 - native SurrealDB and persistent SurrealKV storage with transactional bulk
   snapshot replacement;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is the first symbol analyzer, followed by ACC graph golden
-fixtures and deeper language analysis.
+The next milestone is Rust dependency extraction and graph-derived measurements,
+followed by ACC graph golden fixtures and additional language packs.
 
 ## Workspace
 
@@ -39,6 +41,7 @@ fixtures and deeper language analysis.
 | `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
 | `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
 | `detamu-language` | Language extensions within the code model |
+| `detamu-language-rust` | Rust symbols, hierarchy, and syntax complexity |
 | `detamu-source-git` | Git discovery, snapshot resolution, and tracked-file inventory |
 | `detamu-store` | Generic storage port and in-memory reference |
 | `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |

@@ -1,5 +1,7 @@
 use std::{process::ExitCode, sync::Arc};
 
+use detamu_language::LanguagePack;
+use detamu_language_rust::RustLanguagePack;
 use detamu_model::SourceRequest;
 use detamu_model_code::AvecCodeScorer;
 use detamu_sdk::Detamu;
@@ -23,7 +25,7 @@ async fn main() -> ExitCode {
                 "store": "in-memory",
                 "surreal": "surrealkv",
                 "world_models": ["code"],
-                "language_packs": [],
+                "language_packs": ["rust"],
             });
             println!("{report}");
             ExitCode::SUCCESS
@@ -101,8 +103,10 @@ async fn index_repository(
             return ExitCode::FAILURE;
         }
     };
+    let rust = RustLanguagePack::new(Arc::new(GitRepositorySource));
     let detamu = Detamu::builder(store)
         .analyzer(Arc::new(GitRepositoryAnalyzer))
+        .analyzers(rust.analyzers())
         .scoring_model(Arc::new(AvecCodeScorer::default()))
         .build();
     let request = SourceRequest {

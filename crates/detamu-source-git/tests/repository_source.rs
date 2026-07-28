@@ -1,7 +1,7 @@
 use std::{fs, path::Path, process::Command, sync::Arc};
 
 use detamu_core::AnalysisCoverage;
-use detamu_model::{ModelAnalyzer, SourceRequest, WorldSource};
+use detamu_model::{ArtifactReader, ModelAnalyzer, SourceRequest, WorldSource};
 use detamu_source_git::{GitRepositoryAnalyzer, GitRepositorySource};
 
 fn run_git(root: &Path, arguments: &[&str]) {
@@ -118,6 +118,28 @@ async fn discovery_is_rooted_at_an_immutable_commit() {
     assert_eq!(files[0].language.as_str(), "rust");
     assert_eq!(files[1].language.as_str(), "typescript");
     assert!(files.iter().all(|file| !file.blob_oid.is_empty()));
+
+    let source = GitRepositorySource;
+    let resolution = source
+        .resolve(&SourceRequest {
+            locator: directory.path().to_string_lossy().into_owned(),
+            version: None,
+        })
+        .await
+        .expect("resolve dirty source");
+    let artifacts = source
+        .artifacts(&resolution.input.sources[0])
+        .await
+        .expect("list artifacts");
+    let rust = artifacts
+        .into_iter()
+        .find(|artifact| artifact.path == "src/lib.rs")
+        .expect("Rust artifact");
+    let content = source
+        .read_many(&resolution.input.sources[0], &[rust])
+        .await
+        .expect("read committed blob");
+    assert_eq!(content[0].bytes, b"pub fn run() {}\n");
 }
 
 #[tokio::test]

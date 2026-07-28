@@ -809,6 +809,8 @@ dependencies = [
 name = "detamu-engine"
 version = "0.1.0"
 dependencies = [
+ "detamu-language",
+ "detamu-language-rust",
  "detamu-model",
  "detamu-model-code",
  "detamu-sdk",
@@ -825,6 +827,21 @@ version = "0.1.0"
 dependencies = [
  "detamu-model",
  "detamu-model-code",
+]
+
+[[package]]
+name = "detamu-language-rust"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-language",
+ "detamu-model",
+ "detamu-model-code",
+ "serde_json",
+ "tokio",
+ "tree-sitter",
+ "tree-sitter-rust",
 ]
 
 [[package]]
@@ -845,6 +862,7 @@ dependencies = [
  "detamu-model",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -3324,6 +3342,7 @@ version = "1.0.151"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
+ "indexmap",
  "itoa",
  "memchr",
  "serde",
@@ -3498,6 +3517,12 @@ dependencies = [
  "quote",
  "syn 2.0.119",
 ]
+
+[[package]]
+name = "streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "string_cache"
@@ -4195,6 +4220,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "tree-sitter"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af1c71c1c4cc0920b20d6b0f6572e7682cd07a6a2faec71067a31fa394c586df"
+dependencies = [
+ "cc",
+ "regex",
+ "regex-syntax",
+ "serde_json",
+ "streaming-iterator",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-language"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009994f150cc0cd50ff54917d5bc8bffe8cad10ca10d81c34da2ec421ae61782"
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
 ]
 
 [[package]]

@@ -58,6 +58,41 @@ pub trait WorldSource: Send + Sync {
     async fn resolve(&self, request: &SourceRequest) -> Result<SourceResolution, SourceError>;
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Artifact {
+    pub path: String,
+    pub content_id: String,
+    pub media_type: Option<String>,
+    pub attributes: Attributes,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArtifactContent {
+    pub artifact: Artifact,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Error)]
+pub enum ArtifactError {
+    #[error("artifact source is unavailable: {0}")]
+    Unavailable(String),
+    #[error("artifact read failed: {0}")]
+    Failed(String),
+}
+
+#[async_trait]
+pub trait ArtifactReader: Send + Sync {
+    fn supports(&self, source: &SourceReference) -> bool;
+
+    async fn artifacts(&self, source: &SourceReference) -> Result<Vec<Artifact>, ArtifactError>;
+
+    async fn read_many(
+        &self,
+        source: &SourceReference,
+        artifacts: &[Artifact],
+    ) -> Result<Vec<ArtifactContent>, ArtifactError>;
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisInput {
     pub snapshot: SnapshotId,
