@@ -163,6 +163,13 @@ non-containment dependency edges and emits incoming/outgoing measurements only
 when rust-analyzer provenance proves that semantic analysis ran. An unavailable
 semantic engine therefore remains unknown rather than becoming a misleading zero.
 
+`detamu-code-coverage` parses external LCOV and Cobertura artifacts before
+indexing, then derives line and branch coverage for each reconciled code entity
+from its source range. It normalizes absolute and platform-specific paths, records
+report provenance, and reports unmatched files diagnostically. A symbol with no
+instrumented lines remains unknown; a covered symbol with no branches receives a
+branch ratio of one. The adapter never invokes a test runner.
+
 ## Observation and scoring flow
 
 ```text

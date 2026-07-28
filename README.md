@@ -49,6 +49,7 @@ resolution, and ACC graph golden comparisons.
 | `detamu-core` | World-model-agnostic kernel types |
 | `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
 | `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
+| `detamu-code-coverage` | LCOV and Cobertura evidence mapped onto code entities |
 | `detamu-language` | Language extensions within the code model |
 | `detamu-language-tree-sitter` | Shared immutable-artifact parsing lifecycle |
 | `detamu-language-rust` | Rust symbols, hierarchy, and syntax complexity |
@@ -70,10 +71,15 @@ cargo test --workspace
 cargo run -p detamu-engine -- doctor
 cargo run -p detamu-engine -- init ./data/detamu.surrealkv
 cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
+cargo run -p detamu-engine -- index . ./data/detamu.surrealkv \
+  --coverage ./coverage/lcov.info --coverage ./coverage/cobertura.xml
 ```
 
 Set `DETAMU_RUST_ANALYZER` to an explicit rust-analyzer binary when it is not
 available on `PATH`. `detamu doctor` reports whether the configured binary works.
+Coverage reports are optional external evidence; Detamu consumes them but does
+not run test suites. SDK consumers can construct `CodeCoverageDeriver` from
+report bytes or filesystem paths.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain
 stable as models and analyzers are added.

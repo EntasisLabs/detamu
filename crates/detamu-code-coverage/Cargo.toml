@@ -1,0 +1,19 @@
+[package]
+name = "detamu-code-coverage"
+description = "LCOV and Cobertura evidence adapter for the Detamu code world model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+detamu-core.workspace = true
+detamu-model.workspace = true
+detamu-model-code.workspace = true
+quick-xml.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

@@ -12,6 +12,7 @@ name = "detamu"
 path = "src/main.rs"
 
 [dependencies]
+detamu-code-coverage.workspace = true
 detamu-model.workspace = true
 detamu-model-code.workspace = true
 detamu-language-lizard.workspace = true
