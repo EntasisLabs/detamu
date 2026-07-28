@@ -1,0 +1,15 @@
+[package]
+name = "detamu-core"
+description = "Domain model and dimensional analysis for Detamu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true
+
