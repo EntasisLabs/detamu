@@ -1,6 +1,6 @@
 [package]
-name = "detamu-language-rust"
-description = "Rust symbol and complexity analyzer for the Detamu code model"
+name = "detamu-language-lizard"
+description = "Optional Lizard compatibility analyzer for broad Detamu language coverage"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,17 +8,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 detamu-core.workspace = true
-detamu-language.workspace = true
-detamu-language-tree-sitter.workspace = true
 detamu-model.workspace = true
 detamu-model-code.workspace = true
 serde_json.workspace = true
-tree-sitter.workspace = true
-tree-sitter-rust.workspace = true
-
-[dev-dependencies]
-async-trait.workspace = true
 tokio.workspace = true
 
 [lints]

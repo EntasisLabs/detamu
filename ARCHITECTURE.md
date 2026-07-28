@@ -72,9 +72,15 @@ all requested blobs and verifies every returned object identity.
 
 Observers may enrich the same entity. Batch reconciliation merges non-conflicting
 attributes, measurements, and scores by stable entity identity, deduplicates
-identical relations, and rejects conflicting evidence. Domain-specific conflict
-resolution remains a future model-pack concern; the kernel never picks a winner
-silently.
+identical relations, and rejects conflicting evidence from the same observer.
+Measurements with the same semantic name from different observers coexist with
+their provenance and confidence. Consumers select evidence deterministically by
+confidence and observer identity; the kernel never silently overwrites evidence.
+
+Analyzer descriptors declare typed capabilities and whether execution is required
+or optional. An unavailable optional tool adds a diagnostic and makes coverage
+partial without aborting the snapshot. Failed required analyzers and malformed
+output still fail indexing.
 
 ## Git code source
 
@@ -103,9 +109,12 @@ observed commit times; negative author-date movement is clamped to zero.
 
 ## Rust language pack
 
-`detamu-language-rust` parses committed Rust blobs with Tree-sitter. Its first
-analyzer emits structs, enums, unions, type aliases, traits, modules, functions,
-trait methods, and impl methods. It produces:
+`detamu-language-tree-sitter` owns artifact selection, immutable content reads,
+parser execution, diagnostics, and provenance. A language pack supplies only its
+grammar, extensions, capabilities, configuration version, and tree-to-observation
+rules. `detamu-language-rust` is the first such specification and emits structs,
+enums, unions, type aliases, traits, modules, functions, trait methods, and impl
+methods. It produces:
 
 - ACC-compatible SHA-256 location identities (`path:name:line`, first 16 bytes);
 - one-based source ranges and qualified names;
@@ -118,6 +127,25 @@ branching and loop constructs, match arms, try expressions, and boolean decision
 expressions. It is deterministic but not yet claimed to be byte-for-byte Lizard
 parity. Missing graph and coverage evidence remains absent, so AVEC scoring skips
 those entities until the required measurements exist.
+
+## Layered language analysis
+
+Detamu does not reimplement every language frontend. Code analysis is layered:
+
+- `detamu-language-lizard` invokes an optional installed Lizard binary against a
+  temporary materialization of immutable artifacts. Its CSV output supplies broad
+  baseline functions, LOC, complexity, and parameter evidence with ACC-compatible
+  identities. Missing Lizard never prevents other analyzers from completing.
+- Tree-sitter language specifications provide fast, in-process structure and
+  deterministic syntax observations.
+- `detamu-language-lsp` provides a generic stdio process lifecycle, initialize /
+  shutdown handshake, Content-Length JSON-RPC framing, request timeouts, and an
+  adapter trait. Language-specific packs own LSP requests and normalization.
+
+All layers emit the same normalized code model. Lizard has lower metric confidence
+than the in-process Rust syntax specification, so both values remain inspectable
+while scoring selects the higher-confidence evidence. LSP adapters can add deeper
+references, calls, types, and diagnostics without changing the kernel.
 
 ## Observation and scoring flow
 
@@ -165,9 +193,9 @@ graph.
 
 1. Keep the generic seams stable.
 2. Port ACC behavior into `detamu-model-code`.
-3. Add Rust dependency extraction and graph-derived measurements.
-4. Verify formulas and graph output with C# ACC golden fixtures.
-5. Add language packs against the same artifact and analyzer ports.
+3. Add the first LSP adapter, Rust dependency extraction, and graph measurements.
+4. Verify formulas, Lizard parity, and graph output with C# ACC golden fixtures.
+5. Add languages through Tree-sitter specifications and LSP launch adapters.
 6. Prove the architecture with a second pack for GitHub issues and pull requests.
 
 Cross-domain links such as `ticket -> implemented_by -> pull request -> modifies

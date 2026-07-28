@@ -23,15 +23,20 @@ The current workspace establishes:
   tracked-file language inventory;
 - rename-aware bulk Git history with contributor, churn, timing, and recent
   frequency evidence anchored to each snapshot;
-- immutable artifact access and a Tree-sitter Rust pack producing types,
-  functions, methods, syntax metrics, and containment relations;
+- immutable artifact access and a reusable Tree-sitter host, with a Rust pack
+  producing types, functions, methods, syntax metrics, and containment;
+- an optional Lizard compatibility adapter for broad baseline language coverage;
+- a generic, process-isolated LSP lifecycle and JSON-RPC transport for future
+  semantic language adapters;
+- typed analyzer capabilities, optional-tool degradation, and per-measurement
+  provenance/confidence for deterministic multi-analyzer reconciliation;
 - generic storage with an in-memory behavioral reference;
 - native SurrealDB and persistent SurrealKV storage with transactional bulk
   snapshot replacement;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is Rust dependency extraction and graph-derived measurements,
-followed by ACC graph golden fixtures and additional language packs.
+The next milestone is the first LSP semantic adapter plus Rust dependency
+extraction and graph-derived measurements, followed by ACC graph golden fixtures.
 
 ## Workspace
 
@@ -41,7 +46,10 @@ followed by ACC graph golden fixtures and additional language packs.
 | `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
 | `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
 | `detamu-language` | Language extensions within the code model |
+| `detamu-language-tree-sitter` | Shared immutable-artifact parsing lifecycle |
 | `detamu-language-rust` | Rust symbols, hierarchy, and syntax complexity |
+| `detamu-language-lizard` | Optional broad-coverage ACC metrics compatibility |
+| `detamu-language-lsp` | Generic LSP stdio lifecycle and adapter boundary |
 | `detamu-source-git` | Git discovery, snapshot resolution, and tracked-file inventory |
 | `detamu-store` | Generic storage port and in-memory reference |
 | `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |

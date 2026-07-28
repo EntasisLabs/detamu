@@ -3,7 +3,10 @@ members = [
     "crates/detamu-core",
     "crates/detamu-engine",
     "crates/detamu-language",
+    "crates/detamu-language-lizard",
+    "crates/detamu-language-lsp",
     "crates/detamu-language-rust",
+    "crates/detamu-language-tree-sitter",
     "crates/detamu-model",
     "crates/detamu-model-code",
     "crates/detamu-sdk",
@@ -24,7 +27,10 @@ rust-version = "1.89"
 async-trait = "0.1"
 detamu-core = { path = "crates/detamu-core" }
 detamu-language = { path = "crates/detamu-language" }
+detamu-language-lizard = { path = "crates/detamu-language-lizard" }
+detamu-language-lsp = { path = "crates/detamu-language-lsp" }
 detamu-language-rust = { path = "crates/detamu-language-rust" }
+detamu-language-tree-sitter = { path = "crates/detamu-language-tree-sitter" }
 detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
 detamu-source-git = { path = "crates/detamu-source-git" }

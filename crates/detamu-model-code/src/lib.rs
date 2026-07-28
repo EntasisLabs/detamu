@@ -8,8 +8,8 @@ mod avec;
 use std::{collections::BTreeMap, fmt::Write as _};
 
 use detamu_core::{
-    Attributes, Entity, EntityId, EntityObservation, Measurement, ModelId, Relation, RelationId,
-    RelationObservation, SnapshotId, SnapshotVersion, WorldId,
+    Attributes, Entity, EntityId, EntityObservation, EvidenceProvenance, Measurement, ModelId,
+    Relation, RelationId, RelationObservation, SnapshotId, SnapshotVersion, WorldId,
 };
 use detamu_model::{ModelAnalyzer, ModelDescriptor, ScoringModel, WorldModelPack};
 use serde::{Deserialize, Serialize};
@@ -185,14 +185,34 @@ pub fn file_observation(
             json!(history.recent_frequency.as_str()),
         );
         measurements.extend([
-            measurement("git.total_commits", history.total_commits),
-            measurement("git.contributors", history.contributors),
-            measurement("git.recent_commits", history.recent_commits),
-            Measurement {
-                name: "git.average_days_between_changes".to_owned(),
-                value: history.average_days_between_changes,
-                unit: Some("days".to_owned()),
-            },
+            observed_measurement(
+                "git.total_commits",
+                history.total_commits,
+                "count",
+                "git",
+                1.0,
+            ),
+            observed_measurement(
+                "git.contributors",
+                history.contributors,
+                "count",
+                "git",
+                1.0,
+            ),
+            observed_measurement(
+                "git.recent_commits",
+                history.recent_commits,
+                "count",
+                "git",
+                1.0,
+            ),
+            evidence_measurement(
+                "git.average_days_between_changes",
+                history.average_days_between_changes,
+                Some("days"),
+                "git",
+                1.0,
+            ),
         ]);
     }
 
@@ -300,6 +320,8 @@ pub fn syntax_symbol_observation(
     location: SymbolLocation<'_>,
     metrics: SyntaxMetrics,
     history: Option<&FileHistory>,
+    observer: &str,
+    confidence: f64,
 ) -> EntityObservation {
     let mut attributes = BTreeMap::new();
     attributes.insert("language".to_owned(), json!(symbol.language.as_str()));
@@ -309,20 +331,58 @@ pub fn syntax_symbol_observation(
     attributes.insert("line_end".to_owned(), json!(location.line_end));
     attributes.insert("signature".to_owned(), json!(location.signature));
     let mut measurements = vec![
-        measurement("code.lines_of_code", metrics.lines_of_code),
-        measurement("code.cyclomatic_complexity", metrics.cyclomatic_complexity),
-        measurement("code.parameters", metrics.parameters),
+        observed_measurement(
+            "code.lines_of_code",
+            metrics.lines_of_code,
+            "count",
+            observer,
+            confidence,
+        ),
+        observed_measurement(
+            "code.cyclomatic_complexity",
+            metrics.cyclomatic_complexity,
+            "count",
+            observer,
+            confidence,
+        ),
+        observed_measurement(
+            "code.parameters",
+            metrics.parameters,
+            "count",
+            observer,
+            confidence,
+        ),
     ];
     if let Some(history) = history {
         measurements.extend([
-            measurement("git.total_commits", history.total_commits),
-            measurement("git.contributors", history.contributors),
-            measurement("git.recent_commits", history.recent_commits),
-            Measurement {
-                name: "git.average_days_between_changes".to_owned(),
-                value: history.average_days_between_changes,
-                unit: Some("days".to_owned()),
-            },
+            observed_measurement(
+                "git.total_commits",
+                history.total_commits,
+                "count",
+                "git",
+                1.0,
+            ),
+            observed_measurement(
+                "git.contributors",
+                history.contributors,
+                "count",
+                "git",
+                1.0,
+            ),
+            observed_measurement(
+                "git.recent_commits",
+                history.recent_commits,
+                "count",
+                "git",
+                1.0,
+            ),
+            evidence_measurement(
+                "git.average_days_between_changes",
+                history.average_days_between_changes,
+                Some("days"),
+                "git",
+                1.0,
+            ),
         ]);
     }
     EntityObservation {
@@ -378,16 +438,19 @@ impl NodeMetrics {
                 name: "git.average_days_between_changes".to_owned(),
                 value: self.git_average_days_between_changes,
                 unit: Some("days".to_owned()),
+                evidence: None,
             },
             Measurement {
                 name: "test.line_coverage".to_owned(),
                 value: self.test_line_coverage,
                 unit: Some("ratio".to_owned()),
+                evidence: None,
             },
             Measurement {
                 name: "test.branch_coverage".to_owned(),
                 value: self.test_branch_coverage,
                 unit: Some("ratio".to_owned()),
+                evidence: None,
             },
         ]
     }
@@ -495,14 +558,62 @@ fn measurement(name: &str, value: u32) -> Measurement {
         name: name.to_owned(),
         value: f64::from(value),
         unit: Some("count".to_owned()),
+        evidence: None,
+    }
+}
+
+fn observed_measurement(
+    name: &str,
+    value: u32,
+    unit: &str,
+    observer: &str,
+    confidence: f64,
+) -> Measurement {
+    evidence_measurement(name, f64::from(value), Some(unit), observer, confidence)
+}
+
+fn evidence_measurement(
+    name: &str,
+    value: f64,
+    unit: Option<&str>,
+    observer: &str,
+    confidence: f64,
+) -> Measurement {
+    Measurement {
+        name: name.to_owned(),
+        value,
+        unit: unit.map(str::to_owned),
+        evidence: Some(EvidenceProvenance {
+            observer: observer.to_owned(),
+            confidence: confidence.clamp(0.0, 1.0),
+        }),
     }
 }
 
 fn value(measurements: &[Measurement], name: &str) -> Option<f64> {
     measurements
         .iter()
-        .find(|measurement| measurement.name == name)
+        .filter(|measurement| measurement.name == name)
+        .max_by(|left, right| {
+            evidence_confidence(left)
+                .total_cmp(&evidence_confidence(right))
+                .then_with(|| evidence_observer(right).cmp(evidence_observer(left)))
+        })
         .map(|measurement| measurement.value)
+}
+
+fn evidence_confidence(measurement: &Measurement) -> f64 {
+    measurement
+        .evidence
+        .as_ref()
+        .map_or(0.0, |evidence| evidence.confidence)
+}
+
+fn evidence_observer(measurement: &Measurement) -> &str {
+    measurement
+        .evidence
+        .as_ref()
+        .map_or("", |evidence| evidence.observer.as_str())
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]

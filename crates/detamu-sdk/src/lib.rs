@@ -2,10 +2,12 @@
 
 use std::sync::Arc;
 
-use detamu_core::{AnalysisCoverage, ObservationBatch, SnapshotId};
+use detamu_core::{
+    AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ObservationBatch, SnapshotId,
+};
 use detamu_model::{
-    AnalysisInput, AnalyzerError, ModelAnalyzer, ScoringError, ScoringModel, SourceError,
-    SourceRequest, WorldSource,
+    AnalysisInput, AnalyzerError, AnalyzerExecution, ModelAnalyzer, ScoringError, ScoringModel,
+    SourceError, SourceRequest, WorldSource,
 };
 use detamu_store::{DetamuStore, StoreError};
 use thiserror::Error;
@@ -28,6 +30,7 @@ pub enum DetamuError {
 pub struct IndexReport {
     pub snapshot: SnapshotId,
     pub analyzers_run: usize,
+    pub analyzers_skipped: usize,
     pub scoring_models_run: usize,
     pub entities: usize,
     pub relations: usize,
@@ -57,9 +60,31 @@ impl Detamu {
     /// Returns an error when observation, scoring, or persistence fails.
     pub async fn index(&self, input: AnalysisInput) -> Result<IndexReport, DetamuError> {
         let mut combined: Option<ObservationBatch> = None;
+        let mut analyzers_run = 0;
+        let mut analyzers_skipped = 0;
 
         for analyzer in &self.analyzers {
-            let observations = analyzer.analyze(&input).await?;
+            let descriptor = analyzer.descriptor();
+            let observations = match analyzer.analyze(&input).await {
+                Ok(observations) => observations,
+                Err(AnalyzerError::Unavailable(message))
+                    if descriptor.execution == AnalyzerExecution::Optional =>
+                {
+                    analyzers_skipped += 1;
+                    let batch = combined
+                        .get_or_insert_with(|| ObservationBatch::empty(input.snapshot.clone()));
+                    batch.coverage = AnalysisCoverage::Partial;
+                    batch.diagnostics.push(AnalysisDiagnostic {
+                        severity: DiagnosticSeverity::Info,
+                        observer: descriptor.name,
+                        message: format!("optional analyzer unavailable: {message}"),
+                        scope: None,
+                    });
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            analyzers_run += 1;
             if observations.snapshot != input.snapshot {
                 return Err(DetamuError::SnapshotMismatch);
             }
@@ -79,7 +104,8 @@ impl Detamu {
 
         let report = IndexReport {
             snapshot: combined.snapshot.clone(),
-            analyzers_run: self.analyzers.len(),
+            analyzers_run,
+            analyzers_skipped,
             scoring_models_run: self.scoring_models.len(),
             entities: combined.entities.len(),
             relations: combined.relations.len(),
@@ -160,12 +186,16 @@ impl DetamuBuilder {
 mod tests {
     use async_trait::async_trait;
     use detamu_core::{ModelId, ScoreModelId, SnapshotVersion, WorldId};
-    use detamu_model::{AnalyzerDescriptor, ScoringModelDescriptor, SourceReference};
+    use detamu_model::{
+        AnalyzerCapability, AnalyzerDescriptor, AnalyzerExecution, ScoringModelDescriptor,
+        SourceReference,
+    };
     use detamu_store::InMemoryStore;
 
     use super::*;
 
     struct EmptyAnalyzer;
+    struct MissingOptionalAnalyzer;
     struct EmptyScorer;
 
     #[async_trait]
@@ -175,7 +205,8 @@ mod tests {
                 name: "empty".to_owned(),
                 version: "1".to_owned(),
                 model: ModelId::new("code"),
-                capabilities: vec!["symbols".to_owned()],
+                capabilities: vec![AnalyzerCapability::Symbols],
+                execution: AnalyzerExecution::Required,
             }
         }
 
@@ -198,6 +229,23 @@ mod tests {
 
         fn score(&self, _batch: &mut ObservationBatch) -> Result<(), ScoringError> {
             Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl ModelAnalyzer for MissingOptionalAnalyzer {
+        fn descriptor(&self) -> AnalyzerDescriptor {
+            AnalyzerDescriptor {
+                name: "missing.optional".to_owned(),
+                version: "1".to_owned(),
+                model: ModelId::new("code"),
+                capabilities: vec![AnalyzerCapability::Metrics],
+                execution: AnalyzerExecution::Optional,
+            }
+        }
+
+        async fn analyze(&self, _input: &AnalysisInput) -> Result<ObservationBatch, AnalyzerError> {
+            Err(AnalyzerError::Unavailable("not installed".to_owned()))
         }
     }
 
@@ -224,5 +272,28 @@ mod tests {
         assert_eq!(report.analyzers_run, 1);
         assert_eq!(report.scoring_models_run, 1);
         assert_eq!(report.coverage, AnalysisCoverage::Complete);
+    }
+
+    #[tokio::test]
+    async fn unavailable_optional_analyzers_do_not_abort_indexing() {
+        let store = Arc::new(InMemoryStore::default());
+        let detamu = Detamu::builder(store)
+            .analyzer(Arc::new(EmptyAnalyzer))
+            .analyzer(Arc::new(MissingOptionalAnalyzer))
+            .build();
+        let report = detamu
+            .index(AnalysisInput {
+                snapshot: SnapshotId::new(
+                    WorldId::new("code.repository:repo"),
+                    SnapshotVersion::new("abc123"),
+                ),
+                sources: Vec::new(),
+                changed_entities: None,
+            })
+            .await
+            .expect("index without optional analyzer");
+        assert_eq!(report.analyzers_run, 1);
+        assert_eq!(report.analyzers_skipped, 1);
+        assert_eq!(report.coverage, AnalysisCoverage::Partial);
     }
 }

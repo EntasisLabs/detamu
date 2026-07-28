@@ -15,9 +15,9 @@ use std::{
 use async_trait::async_trait;
 use detamu_core::{AnalysisCoverage, ModelId, ObservationBatch, ObserverProvenance};
 use detamu_model::{
-    AnalysisInput, AnalyzerDescriptor, AnalyzerError, Artifact, ArtifactContent, ArtifactError,
-    ArtifactReader, ModelAnalyzer, SourceDescriptor, SourceError, SourceReference, SourceRequest,
-    SourceResolution, WorldSource,
+    AnalysisInput, AnalyzerCapability, AnalyzerDescriptor, AnalyzerError, AnalyzerExecution,
+    Artifact, ArtifactContent, ArtifactError, ArtifactReader, ModelAnalyzer, SourceDescriptor,
+    SourceError, SourceReference, SourceRequest, SourceResolution, WorldSource,
 };
 use detamu_model_code::{
     CODE_MODEL_ID, FileHistory, GitOid, LanguageId, RepositoryId, RevisionId, file_observation,
@@ -273,10 +273,11 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             model: ModelId::new(CODE_MODEL_ID),
             capabilities: vec![
-                "tracked_files".to_owned(),
-                "language_detection".to_owned(),
-                "git_history".to_owned(),
+                AnalyzerCapability::Other("tracked_files".to_owned()),
+                AnalyzerCapability::Other("language_detection".to_owned()),
+                AnalyzerCapability::Metrics,
             ],
+            execution: AnalyzerExecution::Required,
         }
     }
 
@@ -503,14 +504,22 @@ pub fn detect_language(path: &str) -> Option<LanguageId> {
     let extension = Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
     let language = match extension.as_str() {
         "cs" => "csharp",
-        "ts" => "typescript",
-        "js" => "javascript",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
         "py" => "python",
         "go" => "go",
         "rs" => "rust",
         "java" => "java",
-        "cpp" => "cpp",
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" => "cpp",
         "c" | "h" => "c",
+        "rb" => "ruby",
+        "php" => "php",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "scala" | "sc" => "scala",
+        "lua" => "lua",
+        "pl" | "pm" => "perl",
+        "sol" => "solidity",
         _ => return None,
     };
     Some(LanguageId::new(language))

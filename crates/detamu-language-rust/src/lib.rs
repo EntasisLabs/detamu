@@ -2,26 +2,20 @@
 
 use std::{path::Path, sync::Arc};
 
-use async_trait::async_trait;
-use detamu_core::{
-    AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ModelId, ObservationBatch,
-    ObserverProvenance,
-};
+use detamu_core::ObservationBatch;
 use detamu_language::LanguagePack;
-use detamu_model::{
-    AnalysisInput, AnalyzerDescriptor, AnalyzerError, Artifact, ArtifactContent, ArtifactReader,
-    ModelAnalyzer,
-};
+use detamu_language_tree_sitter::{TreeSitterAnalyzer, TreeSitterSpec};
+use detamu_model::{AnalyzerCapability, Artifact, ArtifactReader, ModelAnalyzer};
 use detamu_model_code::{
-    CODE_MODEL_ID, CodeSymbol, FileHistory, GitOid, LanguageId, NodeKind, RecentFrequency,
-    RepositoryId, RevisionId, SymbolLocation, SyntaxMetrics, acc_symbol_id, file_contains_symbol,
-    syntax_symbol_observation,
+    CodeSymbol, FileHistory, LanguageId, NodeKind, RecentFrequency, RevisionId, SymbolLocation,
+    SyntaxMetrics, acc_symbol_id, file_contains_symbol, syntax_symbol_observation,
 };
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
-pub struct RustLanguageAnalyzer {
-    artifacts: Arc<dyn ArtifactReader>,
-}
+pub type RustLanguageAnalyzer = TreeSitterAnalyzer<RustTreeSitterSpec>;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RustTreeSitterSpec;
 
 pub struct RustLanguagePack {
     artifacts: Arc<dyn ArtifactReader>,
@@ -43,99 +37,64 @@ impl LanguagePack for RustLanguagePack {
     }
 
     fn analyzers(&self) -> Vec<Arc<dyn ModelAnalyzer>> {
-        vec![Arc::new(RustLanguageAnalyzer::new(self.artifacts.clone()))]
+        vec![Arc::new(TreeSitterAnalyzer::new(
+            self.artifacts.clone(),
+            RustTreeSitterSpec,
+        ))]
     }
 }
 
-impl RustLanguageAnalyzer {
-    pub fn new(artifacts: Arc<dyn ArtifactReader>) -> Self {
-        Self { artifacts }
-    }
-}
-
-#[async_trait]
-impl ModelAnalyzer for RustLanguageAnalyzer {
-    fn descriptor(&self) -> AnalyzerDescriptor {
-        AnalyzerDescriptor {
-            name: "treesitter.rust".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            model: ModelId::new(CODE_MODEL_ID),
-            capabilities: vec![
-                "symbols".to_owned(),
-                "hierarchy".to_owned(),
-                "complexity".to_owned(),
-            ],
-        }
+impl TreeSitterSpec for RustTreeSitterSpec {
+    fn language(&self) -> LanguageId {
+        LanguageId::new("rust")
     }
 
-    async fn analyze(&self, input: &AnalysisInput) -> Result<ObservationBatch, AnalyzerError> {
-        let source = input
-            .sources
-            .iter()
-            .find(|source| self.artifacts.supports(source))
-            .ok_or_else(|| AnalyzerError::Unavailable("artifact source is missing".to_owned()))?;
-        let artifacts = self
-            .artifacts
-            .artifacts(source)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?
-            .into_iter()
-            .filter(is_rust)
-            .collect::<Vec<_>>();
-        let contents = self
-            .artifacts
-            .read_many(source, &artifacts)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
-        let revision = revision(input)?;
-        tokio::task::spawn_blocking(move || analyze_contents(&revision, contents))
-            .await
-            .map_err(|error| AnalyzerError::Failed(format!("Rust analyzer task failed: {error}")))?
+    fn extensions(&self) -> &[&str] {
+        &["rs"]
     }
-}
 
-fn analyze_contents(
-    revision: &RevisionId,
-    contents: Vec<ArtifactContent>,
-) -> Result<ObservationBatch, AnalyzerError> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .map_err(|error| AnalyzerError::Failed(format!("load Rust grammar: {error}")))?;
-    let mut batch = ObservationBatch::empty(revision.snapshot());
-    batch.coverage = AnalysisCoverage::Partial;
-    batch.provenance.push(ObserverProvenance {
-        observer: "treesitter.rust".to_owned(),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-        configuration_digest: Some("syntax-metrics-v1".to_owned()),
-        source: None,
-    });
+    fn grammar(&self) -> tree_sitter::Language {
+        tree_sitter_rust::LANGUAGE.into()
+    }
 
-    for content in contents {
-        let Some(tree) = parser.parse(&content.bytes, None) else {
-            batch.diagnostics.push(diagnostic(
-                &content.artifact.path,
-                "Tree-sitter did not produce a syntax tree",
-            ));
-            continue;
-        };
-        if tree.root_node().has_error() {
-            batch.diagnostics.push(diagnostic(
-                &content.artifact.path,
-                "Rust source contains syntax errors; observations may be incomplete",
-            ));
-        }
-        let history = history(&content.artifact);
+    fn observer(&self) -> &'static str {
+        "treesitter.rust"
+    }
+
+    fn version(&self) -> &'static str {
+        env!("CARGO_PKG_VERSION")
+    }
+
+    fn configuration_digest(&self) -> &'static str {
+        "syntax-metrics-v1"
+    }
+
+    fn capabilities(&self) -> Vec<AnalyzerCapability> {
+        vec![
+            AnalyzerCapability::Symbols,
+            AnalyzerCapability::Hierarchy,
+            AnalyzerCapability::Metrics,
+        ]
+    }
+
+    fn observe_tree(
+        &self,
+        revision: &RevisionId,
+        artifact: &Artifact,
+        source: &[u8],
+        root: Node<'_>,
+        batch: &mut ObservationBatch,
+    ) {
+        let history = history(artifact);
         collect_symbols(
             revision,
-            tree.root_node(),
-            &content.bytes,
-            &content.artifact.path,
+            root,
+            source,
+            &artifact.path,
             history.as_ref(),
-            &mut batch,
+            batch,
         );
     }
-    Ok(batch)
 }
 
 fn collect_symbols(
@@ -176,6 +135,8 @@ fn collect_symbols(
             },
             metrics,
             history,
+            "treesitter.rust",
+            0.9,
         ));
         batch
             .relations
@@ -341,42 +302,13 @@ fn u32_attribute(artifact: &Artifact, name: &str) -> Option<u32> {
     u32::try_from(artifact.attributes.get(name)?.as_u64()?).ok()
 }
 
-fn is_rust(artifact: &Artifact) -> bool {
-    artifact
-        .attributes
-        .get("language")
-        .and_then(serde_json::Value::as_str)
-        == Some("rust")
-}
-
-fn revision(input: &AnalysisInput) -> Result<RevisionId, AnalyzerError> {
-    let repository = input
-        .snapshot
-        .world
-        .as_str()
-        .strip_prefix("code.repository:")
-        .ok_or_else(|| AnalyzerError::Failed("snapshot is not a code repository".to_owned()))?;
-    Ok(RevisionId::new(
-        RepositoryId::new(repository),
-        GitOid::new(input.snapshot.version.as_str()),
-    ))
-}
-
-fn diagnostic(path: &str, message: &str) -> AnalysisDiagnostic {
-    AnalysisDiagnostic {
-        severity: DiagnosticSeverity::Warning,
-        observer: "treesitter.rust".to_owned(),
-        message: message.to_owned(),
-        scope: Some(path.to_owned()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
 
+    use async_trait::async_trait;
     use detamu_core::{SnapshotId, SnapshotVersion, WorldId};
-    use detamu_model::{ArtifactError, SourceReference};
+    use detamu_model::{AnalysisInput, ArtifactContent, ArtifactError, SourceReference};
     use serde_json::json;
 
     use super::*;
@@ -455,9 +387,12 @@ pub fn choose(value: u8) -> u8 {
 
     #[tokio::test]
     async fn emits_symbols_metrics_and_file_containment() {
-        let analyzer = RustLanguageAnalyzer::new(Arc::new(FixtureReader {
-            artifact: artifact(),
-        }));
+        let analyzer = RustLanguageAnalyzer::new(
+            Arc::new(FixtureReader {
+                artifact: artifact(),
+            }),
+            RustTreeSitterSpec,
+        );
         let snapshot = SnapshotId::new(
             WorldId::new("code.repository:fixture"),
             SnapshotVersion::new("abc123"),

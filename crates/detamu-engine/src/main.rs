@@ -1,6 +1,7 @@
 use std::{process::ExitCode, sync::Arc};
 
 use detamu_language::LanguagePack;
+use detamu_language_lizard::LizardAnalyzer;
 use detamu_language_rust::RustLanguagePack;
 use detamu_model::SourceRequest;
 use detamu_model_code::AvecCodeScorer;
@@ -18,6 +19,7 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("doctor") => {
+            let lizard = LizardAnalyzer::new(Arc::new(GitRepositorySource));
             let report = serde_json::json!({
                 "name": "detamu",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -26,6 +28,11 @@ async fn main() -> ExitCode {
                 "surreal": "surrealkv",
                 "world_models": ["code"],
                 "language_packs": ["rust"],
+                "analysis_engines": {
+                    "tree_sitter": true,
+                    "lizard": lizard.is_available().await,
+                    "lsp_host": true,
+                },
             });
             println!("{report}");
             ExitCode::SUCCESS
@@ -107,6 +114,7 @@ async fn index_repository(
     let detamu = Detamu::builder(store)
         .analyzer(Arc::new(GitRepositoryAnalyzer))
         .analyzers(rust.analyzers())
+        .analyzer(Arc::new(LizardAnalyzer::new(Arc::new(GitRepositorySource))))
         .scoring_model(Arc::new(AvecCodeScorer::default()))
         .build();
     let request = SourceRequest {
@@ -120,6 +128,8 @@ async fn index_repository(
                 "snapshot": report.snapshot.version.as_str(),
                 "entities": report.entities,
                 "relations": report.relations,
+                "analyzers_run": report.analyzers_run,
+                "analyzers_skipped": report.analyzers_skipped,
                 "coverage": format!("{:?}", report.coverage).to_ascii_lowercase(),
             });
             println!("{result}");

@@ -105,7 +105,45 @@ pub struct AnalyzerDescriptor {
     pub name: String,
     pub version: String,
     pub model: ModelId,
-    pub capabilities: Vec<String>,
+    pub capabilities: Vec<AnalyzerCapability>,
+    pub execution: AnalyzerExecution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzerCapability {
+    Symbols,
+    Metrics,
+    Hierarchy,
+    Imports,
+    References,
+    Calls,
+    Types,
+    Diagnostics,
+    Other(String),
+}
+
+impl AnalyzerCapability {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Symbols => "symbols",
+            Self::Metrics => "metrics",
+            Self::Hierarchy => "hierarchy",
+            Self::Imports => "imports",
+            Self::References => "references",
+            Self::Calls => "calls",
+            Self::Types => "types",
+            Self::Diagnostics => "diagnostics",
+            Self::Other(value) => value,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyzerExecution {
+    Required,
+    Optional,
 }
 
 #[derive(Debug, Error)]

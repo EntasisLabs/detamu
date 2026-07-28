@@ -11,6 +11,6 @@ pub use identity::{
 };
 pub use observation::{
     AnalysisCoverage, AnalysisDiagnostic, Attributes, BatchMismatch, CommitMode,
-    DiagnosticSeverity, Entity, EntityObservation, Measurement, ObservationBatch,
-    ObserverProvenance, Relation, RelationObservation, Score,
+    DiagnosticSeverity, Entity, EntityObservation, EvidenceProvenance, Measurement,
+    ObservationBatch, ObserverProvenance, Relation, RelationObservation, Score,
 };

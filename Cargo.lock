@@ -810,6 +810,7 @@ name = "detamu-engine"
 version = "0.1.0"
 dependencies = [
  "detamu-language",
+ "detamu-language-lizard",
  "detamu-language-rust",
  "detamu-model",
  "detamu-model-code",
@@ -830,18 +831,56 @@ dependencies = [
 ]
 
 [[package]]
+name = "detamu-language-lizard"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-model",
+ "detamu-model-code",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "detamu-language-lsp"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-model",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "detamu-language-rust"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "detamu-core",
  "detamu-language",
+ "detamu-language-tree-sitter",
  "detamu-model",
  "detamu-model-code",
  "serde_json",
  "tokio",
  "tree-sitter",
  "tree-sitter-rust",
+]
+
+[[package]]
+name = "detamu-language-tree-sitter"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-model",
+ "detamu-model-code",
+ "serde_json",
+ "tokio",
+ "tree-sitter",
 ]
 
 [[package]]

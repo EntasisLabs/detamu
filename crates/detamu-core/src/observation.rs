@@ -28,6 +28,15 @@ pub struct Measurement {
     pub name: String,
     pub value: f64,
     pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<EvidenceProvenance>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EvidenceProvenance {
+    pub observer: String,
+    /// Relative trust in this evidence in the inclusive range `0.0..=1.0`.
+    pub confidence: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -166,8 +175,15 @@ fn merge_entity(
     existing: &mut EntityObservation,
     incoming: EntityObservation,
 ) -> Result<(), BatchMismatch> {
-    if existing.snapshot != incoming.snapshot || existing.entity != incoming.entity {
+    if existing.snapshot != incoming.snapshot
+        || existing.entity.id != incoming.entity.id
+        || existing.entity.model != incoming.entity.model
+        || existing.entity.kind != incoming.entity.kind
+    {
         return Err(BatchMismatch);
+    }
+    if preferred_label(&incoming.entity.label, &existing.entity.label) {
+        existing.entity.label = incoming.entity.label;
     }
     for (name, value) in incoming.attributes {
         if existing
@@ -180,11 +196,14 @@ fn merge_entity(
         existing.attributes.insert(name, value);
     }
     for measurement in incoming.measurements {
-        if let Some(current) = existing
-            .measurements
-            .iter()
-            .find(|current| current.name == measurement.name)
-        {
+        if let Some(current) = existing.measurements.iter().find(|current| {
+            current.name == measurement.name
+                && current.evidence.as_ref().map(|evidence| &evidence.observer)
+                    == measurement
+                        .evidence
+                        .as_ref()
+                        .map(|evidence| &evidence.observer)
+        }) {
             if current != &measurement {
                 return Err(BatchMismatch);
             }
@@ -206,6 +225,15 @@ fn merge_entity(
         }
     }
     Ok(())
+}
+
+fn preferred_label(candidate: &str, current: &str) -> bool {
+    let qualification = |label: &str| label.matches("::").count() + label.matches('.').count();
+    qualification(candidate)
+        .cmp(&qualification(current))
+        .then_with(|| candidate.len().cmp(&current.len()))
+        .then_with(|| current.cmp(candidate))
+        .is_gt()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -241,6 +269,7 @@ mod tests {
                 name: name.to_owned(),
                 value,
                 unit: None,
+                evidence: None,
             }],
             scores: Vec::new(),
         }

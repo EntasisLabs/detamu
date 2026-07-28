@@ -82,6 +82,14 @@ pub fn validate_batch(batch: &ObservationBatch) -> Result<(), StoreError> {
         {
             return inconsistent("an entity contains a non-finite measurement");
         }
+        if observation.measurements.iter().any(|measurement| {
+            measurement
+                .evidence
+                .as_ref()
+                .is_some_and(|evidence| !normalized(evidence.confidence))
+        }) {
+            return inconsistent("measurement evidence contains invalid confidence");
+        }
         if observation
             .scores
             .iter()
