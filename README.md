@@ -19,13 +19,15 @@ The current workspace establishes:
 - model analyzer, scoring, and pack extension contracts;
 - a strongly typed code model containing Git identity, symbols, dependencies,
   ACC metrics, and AVEC Code;
+- deterministic Git repository discovery, immutable commit snapshots, and
+  tracked-file language inventory;
 - generic storage with an in-memory behavioral reference;
 - native SurrealDB and persistent SurrealKV storage with transactional bulk
   snapshot replacement;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is the first code repository indexer, followed by ACC golden
-fixtures and deeper language analysis.
+The next milestone is Git history enrichment and the first symbol analyzer,
+followed by ACC golden fixtures and deeper language analysis.
 
 ## Workspace
 
@@ -35,6 +37,7 @@ fixtures and deeper language analysis.
 | `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
 | `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
 | `detamu-language` | Language extensions within the code model |
+| `detamu-source-git` | Git discovery, snapshot resolution, and tracked-file inventory |
 | `detamu-store` | Generic storage port and in-memory reference |
 | `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |
 | `detamu-sdk` | Model-agnostic orchestration facade |
@@ -48,6 +51,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p detamu-engine -- doctor
 cargo run -p detamu-engine -- init ./data/detamu.surrealkv
+cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
 ```
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain

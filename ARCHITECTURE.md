@@ -39,8 +39,8 @@ without changing the kernel.
              ^   ^          ^
              |   |          |
  model-code /    |      detamu-surreal
-      ^           \        /
- detamu-language   detamu-sdk
+    ^    ^        \        /
+language source-git detamu-sdk
                         ^
                         |
                   detamu-engine
@@ -60,6 +60,27 @@ and event publication.
 A `WorldModelPack` declares its model schema, analyzers, and scoring models.
 Packs are compile-time registered until multiple real models demonstrate the
 requirements for a stable dynamic plugin ABI.
+
+`WorldSource` resolves a source-native locator and optional version into an
+immutable Detamu snapshot plus analyzer input. A source may expose mutable labels
+such as branches, but snapshot identity must use an immutable source version.
+
+## Git code source
+
+`detamu-source-git` is the first source adapter. It:
+
+- discovers the worktree root from any path inside a repository;
+- derives repository identity from a credential-free normalized origin URL, or
+  a hash of the canonical local root when no origin exists;
+- resolves `HEAD` or an explicitly requested revision to a commit OID;
+- treats branch and dirty state as metadata rather than durable identity;
+- enumerates supported tracked files from the exact commit tree in deterministic
+  path order;
+- emits file entities with language, blob OID, Git mode, and byte size.
+
+Inventory never reads the mutable filesystem. Later content analyzers must read
+the corresponding Git blobs or otherwise prove that their input matches the
+requested commit.
 
 ## Observation and scoring flow
 
@@ -107,9 +128,10 @@ graph.
 
 1. Keep the generic seams stable.
 2. Port ACC behavior into `detamu-model-code`.
-3. Build repository and language analyzers against the model contracts.
-4. Verify formulas and graph output with C# ACC golden fixtures.
-5. Prove the architecture with a second pack for GitHub issues and pull requests.
+3. Enrich Git file observations with ACC-compatible history metrics.
+4. Build symbol and dependency analyzers against the model contracts.
+5. Verify formulas and graph output with C# ACC golden fixtures.
+6. Prove the architecture with a second pack for GitHub issues and pull requests.
 
 Cross-domain links such as `ticket -> implemented_by -> pull request -> modifies
 -> code symbol` belong to model packs and reconciliation rules, not special cases

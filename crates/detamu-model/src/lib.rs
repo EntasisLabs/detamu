@@ -23,6 +23,41 @@ pub struct SourceReference {
     pub attributes: Attributes,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceDescriptor {
+    pub name: String,
+    pub version: String,
+    pub model: ModelId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceRequest {
+    pub locator: String,
+    /// A source-native immutable version, or the source's current version when absent.
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceResolution {
+    pub input: AnalysisInput,
+    pub metadata: Attributes,
+}
+
+#[derive(Debug, Error)]
+pub enum SourceError {
+    #[error("source is unavailable: {0}")]
+    Unavailable(String),
+    #[error("source resolution failed: {0}")]
+    Failed(String),
+}
+
+#[async_trait]
+pub trait WorldSource: Send + Sync {
+    fn descriptor(&self) -> SourceDescriptor;
+
+    async fn resolve(&self, request: &SourceRequest) -> Result<SourceResolution, SourceError>;
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisInput {
     pub snapshot: SnapshotId,

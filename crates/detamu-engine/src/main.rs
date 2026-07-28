@@ -1,5 +1,9 @@
-use std::process::ExitCode;
+use std::{process::ExitCode, sync::Arc};
 
+use detamu_model::SourceRequest;
+use detamu_model_code::AvecCodeScorer;
+use detamu_sdk::Detamu;
+use detamu_source_git::{GitRepositoryAnalyzer, GitRepositorySource};
 use detamu_surreal::SurrealStore;
 
 #[tokio::main]
@@ -42,6 +46,23 @@ async fn main() -> ExitCode {
                 }
             }
         }
+        Some("index") => {
+            let Some(repository) = arguments.next() else {
+                eprintln!(
+                    "usage: detamu index <REPOSITORY> <DATABASE_PATH> [NAMESPACE] [DATABASE]"
+                );
+                return ExitCode::from(2);
+            };
+            let Some(path) = arguments.next() else {
+                eprintln!(
+                    "usage: detamu index <REPOSITORY> <DATABASE_PATH> [NAMESPACE] [DATABASE]"
+                );
+                return ExitCode::from(2);
+            };
+            let namespace = arguments.next().unwrap_or_else(|| "detamu".to_owned());
+            let database = arguments.next().unwrap_or_else(|| "detamu".to_owned());
+            index_repository(&repository, &path, &namespace, &database).await
+        }
         Some("help" | "--help" | "-h") | None => {
             print_help();
             ExitCode::SUCCESS
@@ -61,7 +82,48 @@ fn print_help() {
          Commands:\n  \
            doctor    Report installed engine capabilities\n  \
            init      Initialize a native SurrealKV database\n  \
+           index     Index a Git repository snapshot\n  \
            version   Print the engine version\n  \
            help      Print this help"
     );
+}
+
+async fn index_repository(
+    repository: &str,
+    path: &str,
+    namespace: &str,
+    database: &str,
+) -> ExitCode {
+    let store = match SurrealStore::surrealkv(path, namespace, database).await {
+        Ok(store) => Arc::new(store),
+        Err(error) => {
+            eprintln!("failed to open Detamu SurrealKV: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let detamu = Detamu::builder(store)
+        .analyzer(Arc::new(GitRepositoryAnalyzer))
+        .scoring_model(Arc::new(AvecCodeScorer::default()))
+        .build();
+    let request = SourceRequest {
+        locator: repository.to_owned(),
+        version: None,
+    };
+    match detamu.index_source(&GitRepositorySource, &request).await {
+        Ok(report) => {
+            let result = serde_json::json!({
+                "world": report.snapshot.world.as_str(),
+                "snapshot": report.snapshot.version.as_str(),
+                "entities": report.entities,
+                "relations": report.relations,
+                "coverage": format!("{:?}", report.coverage).to_ascii_lowercase(),
+            });
+            println!("{result}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("failed to index repository: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

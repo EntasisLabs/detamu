@@ -63,6 +63,7 @@ impl WorldModelPack for CodeModelPack {
             version: 1,
             entity_kinds: [
                 "module",
+                "file",
                 "namespace",
                 "type",
                 "trait",
@@ -124,6 +125,7 @@ impl RevisionId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
+    File,
     Module,
     Namespace,
     Type,
@@ -139,6 +141,7 @@ pub enum NodeKind {
 impl NodeKind {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::File => "file",
             Self::Module => "module",
             Self::Namespace => "namespace",
             Self::Type => "type",
@@ -150,6 +153,35 @@ impl NodeKind {
             Self::Constant => "constant",
             Self::Unknown => "unknown",
         }
+    }
+}
+
+pub fn file_observation(
+    revision: &RevisionId,
+    path: &str,
+    blob_oid: &str,
+    mode: &str,
+    size: Option<u64>,
+    language: &LanguageId,
+) -> EntityObservation {
+    let mut attributes = BTreeMap::new();
+    attributes.insert("file_path".to_owned(), json!(path));
+    attributes.insert("language".to_owned(), json!(language.as_str()));
+    attributes.insert("git.blob_oid".to_owned(), json!(blob_oid));
+    attributes.insert("git.mode".to_owned(), json!(mode));
+    attributes.insert("file.size_bytes".to_owned(), json!(size));
+
+    EntityObservation {
+        snapshot: revision.snapshot(),
+        entity: Entity {
+            id: EntityId::new(format!("file:{path}")),
+            model: ModelId::new(CODE_MODEL_ID),
+            kind: NodeKind::File.as_str().to_owned(),
+            label: path.to_owned(),
+        },
+        attributes,
+        measurements: Vec::new(),
+        scores: Vec::new(),
     }
 }
 

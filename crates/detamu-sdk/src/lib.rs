@@ -3,7 +3,10 @@
 use std::sync::Arc;
 
 use detamu_core::{AnalysisCoverage, ObservationBatch, SnapshotId};
-use detamu_model::{AnalysisInput, AnalyzerError, ModelAnalyzer, ScoringError, ScoringModel};
+use detamu_model::{
+    AnalysisInput, AnalyzerError, ModelAnalyzer, ScoringError, ScoringModel, SourceError,
+    SourceRequest, WorldSource,
+};
 use detamu_store::{DetamuStore, StoreError};
 use thiserror::Error;
 
@@ -11,6 +14,8 @@ use thiserror::Error;
 pub enum DetamuError {
     #[error(transparent)]
     Analyzer(#[from] AnalyzerError),
+    #[error(transparent)]
+    Source(#[from] SourceError),
     #[error(transparent)]
     Scoring(#[from] ScoringError),
     #[error(transparent)]
@@ -82,6 +87,21 @@ impl Detamu {
         };
         self.store.ingest(combined).await?;
         Ok(report)
+    }
+
+    /// Resolves a world source to an immutable snapshot and indexes it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when source resolution, observation, scoring, or
+    /// persistence fails.
+    pub async fn index_source(
+        &self,
+        source: &dyn WorldSource,
+        request: &SourceRequest,
+    ) -> Result<IndexReport, DetamuError> {
+        let resolution = source.resolve(request).await?;
+        self.index(resolution.input).await
     }
 
     /// Persists a normalized batch supplied by an external model pipeline.

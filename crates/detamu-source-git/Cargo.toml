@@ -1,25 +1,23 @@
 [package]
-name = "detamu-engine"
-description = "Standalone Detamu engine"
+name = "detamu-source-git"
+description = "Deterministic Git repository source and code inventory for Detamu"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "detamu"
-path = "src/main.rs"
-
 [dependencies]
+async-trait.workspace = true
+detamu-core.workspace = true
 detamu-model.workspace = true
 detamu-model-code.workspace = true
-detamu-sdk = { path = "../detamu-sdk" }
-detamu-source-git.workspace = true
-detamu-store.workspace = true
-detamu-surreal = { path = "../detamu-surreal" }
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

@@ -6,6 +6,7 @@ members = [
     "crates/detamu-model",
     "crates/detamu-model-code",
     "crates/detamu-sdk",
+    "crates/detamu-source-git",
     "crates/detamu-store",
     "crates/detamu-surreal",
 ]
@@ -24,12 +25,14 @@ detamu-core = { path = "crates/detamu-core" }
 detamu-language = { path = "crates/detamu-language" }
 detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
+detamu-source-git = { path = "crates/detamu-source-git" }
 detamu-store = { path = "crates/detamu-store" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 surrealdb = { version = "3", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
