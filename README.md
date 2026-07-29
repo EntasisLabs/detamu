@@ -10,6 +10,11 @@ expanding into pull requests, issues, tickets, notes, and projects.
 Detamu runs as either an embeddable Rust SDK or a standalone engine. The engine
 is a thin host around the SDK; it does not contain a second implementation.
 
+```toml
+[dependencies]
+detamu = { version = "0.1", features = ["code", "runtime", "surreal"] }
+```
+
 ## Status
 
 The current workspace establishes:
@@ -52,6 +57,7 @@ by richer import resolution and ACC graph golden comparisons.
 
 | Crate | Responsibility |
 |---|---|
+| `detamu` | Public facade with additive query, code, runtime, and Surreal features |
 | `detamu-core` | World-model-agnostic kernel types |
 | `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
 | `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
@@ -84,6 +90,7 @@ cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
 cargo run -p detamu-engine -- index . ./data/detamu.surrealkv \
   --coverage ./coverage/lcov.info --coverage ./coverage/cobertura.xml
 cargo run -p detamu-engine -- snapshots ./data/detamu.surrealkv
+./scripts/publish-crates.sh check
 ```
 
 Set `DETAMU_RUNTIME_DIR` to a host-managed package root, or use
@@ -96,5 +103,6 @@ report bytes or filesystem paths.
 
 See [Querying Detamu](docs/QUERYING.md) for the Rust and JSON consumption
 contracts, [Analyzer runtimes](docs/RUNTIMES.md) for the Medousa package handoff,
-and [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain
-stable as models and analyzers are added.
+[Publishing](docs/PUBLISHING.md) for the crates.io release procedure, and
+[ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain stable
+as models and analyzers are added.

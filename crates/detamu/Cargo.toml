@@ -1,0 +1,35 @@
+[package]
+name = "detamu"
+description = "Embeddable versioned world-model engine for agents and developer tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["query", "runtime"]
+query = ["dep:detamu-query"]
+runtime = ["dep:detamu-runtime"]
+code = ["query", "dep:detamu-model-code", "dep:detamu-query-code"]
+surreal = ["dep:detamu-surreal"]
+full = ["code", "query", "runtime", "surreal"]
+
+[dependencies]
+detamu-core.workspace = true
+detamu-model.workspace = true
+detamu-model-code = { workspace = true, optional = true }
+detamu-query = { workspace = true, optional = true }
+detamu-query-code = { workspace = true, optional = true }
+detamu-runtime = { workspace = true, optional = true }
+detamu-sdk.workspace = true
+detamu-store.workspace = true
+detamu-surreal = { workspace = true, optional = true }
+
+[lints]
+workspace = true

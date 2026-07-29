@@ -3,8 +3,13 @@ name = "detamu-language-tree-sitter"
 description = "Reusable Tree-sitter analyzer infrastructure for Detamu language packs"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]

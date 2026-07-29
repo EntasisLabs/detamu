@@ -3,8 +3,13 @@ name = "detamu-model"
 description = "World-model, analyzer, and scoring extension contracts for Detamu"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]

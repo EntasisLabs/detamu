@@ -3,8 +3,13 @@ name = "detamu-engine"
 description = "Standalone Detamu engine"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
 rust-version.workspace = true
 
 [[bin]]
@@ -23,10 +28,10 @@ detamu-language-lizard.workspace = true
 detamu-language-rust.workspace = true
 detamu-language-rust-analyzer.workspace = true
 detamu-language.workspace = true
-detamu-sdk = { path = "../detamu-sdk" }
+detamu-sdk.workspace = true
 detamu-source-git.workspace = true
 detamu-store.workspace = true
-detamu-surreal = { path = "../detamu-surreal" }
+detamu-surreal.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 
