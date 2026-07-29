@@ -163,6 +163,13 @@ than the in-process Rust syntax specification, so both values remain inspectable
 while scoring selects the higher-confidence evidence. LSP adapters can add deeper
 references, calls, types, and diagnostics without changing the kernel.
 
+`detamu-runtime` is the process-discovery boundary shared by the standalone
+engine and embedders. It describes optional executable requirements, resolves
+host-managed package roots and overrides, performs bounded version probes, and
+reports structured status. It never downloads or updates packages. That authority
+belongs to Medousa or another host, while analyzer adapters continue to receive
+ordinary executable paths.
+
 After analyzer batches reconcile, `ObservationDeriver` extensions may calculate
 evidence requiring a global view of the snapshot. The code graph deriver counts
 non-containment dependency edges and emits incoming/outgoing measurements only

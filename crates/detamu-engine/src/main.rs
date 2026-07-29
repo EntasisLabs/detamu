@@ -7,6 +7,7 @@ use detamu_language_rust::RustLanguagePack;
 use detamu_language_rust_analyzer::RustAnalyzer;
 use detamu_model::SourceRequest;
 use detamu_model_code::{AvecCodeScorer, GraphMetricsDeriver};
+use detamu_runtime::{RuntimeResolver, RuntimeSpec};
 use detamu_sdk::Detamu;
 use detamu_source_git::{GitRepositoryAnalyzer, GitRepositorySource};
 use detamu_surreal::SurrealStore;
@@ -21,8 +22,9 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("doctor") => {
-            let lizard = LizardAnalyzer::new(Arc::new(GitRepositorySource));
-            let rust_analyzer = RustAnalyzer::from_environment(Arc::new(GitRepositorySource));
+            let inventory = runtime_inventory().await;
+            let lizard = runtime_available(&inventory, "lizard");
+            let rust_analyzer = runtime_available(&inventory, "rust-analyzer");
             let report = serde_json::json!({
                 "name": "detamu",
                 "version": env!("CARGO_PKG_VERSION"),
@@ -34,13 +36,27 @@ async fn main() -> ExitCode {
                 "coverage_formats": ["lcov", "cobertura"],
                 "analysis_engines": {
                     "tree_sitter": true,
-                    "lizard": lizard.is_available().await,
+                    "lizard": lizard,
                     "lsp_host": true,
-                    "rust_analyzer": rust_analyzer.is_available().await,
+                    "rust_analyzer": rust_analyzer,
                 },
+                "runtime_contract": inventory,
             });
             println!("{report}");
             ExitCode::SUCCESS
+        }
+        Some("runtimes") => {
+            let inventory = runtime_inventory().await;
+            match serde_json::to_string(&inventory) {
+                Ok(report) => {
+                    println!("{report}");
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("failed to serialize runtime inventory: {error}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Some("init") => {
             let Some(path) = arguments.next() else {
@@ -111,6 +127,7 @@ fn print_help() {
            impact    Traverse reverse code dependencies\n  \
            diff      Compare two snapshots of the same world\n  \
            gaps      Explain missing AVEC evidence and scores\n  \
+           runtimes  Report optional analyzer package requirements and resolution\n  \
            version   Print the engine version\n  \
            help      Print this help"
     );
@@ -136,13 +153,20 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
         }
     };
     let rust = RustLanguagePack::new(Arc::new(GitRepositorySource));
+    let resolver = RuntimeResolver::from_environment();
+    let lizard_runtime = resolver.resolve(&RuntimeSpec::lizard()).await;
+    let rust_analyzer_runtime = resolver.resolve(&RuntimeSpec::rust_analyzer()).await;
     let mut builder = Detamu::builder(store)
         .analyzer(Arc::new(GitRepositoryAnalyzer))
         .analyzers(rust.analyzers())
-        .analyzer(Arc::new(LizardAnalyzer::new(Arc::new(GitRepositorySource))))
-        .analyzer(Arc::new(RustAnalyzer::from_environment(Arc::new(
-            GitRepositorySource,
-        ))))
+        .analyzer(Arc::new(LizardAnalyzer::with_executable(
+            Arc::new(GitRepositorySource),
+            lizard_runtime.executable,
+        )))
+        .analyzer(Arc::new(
+            RustAnalyzer::new(Arc::new(GitRepositorySource))
+                .with_executable(rust_analyzer_runtime.executable),
+        ))
         .deriver(Arc::new(GraphMetricsDeriver));
     if let Some(coverage) = coverage {
         builder = builder.deriver(coverage);
@@ -175,6 +199,19 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
             ExitCode::FAILURE
         }
     }
+}
+
+async fn runtime_inventory() -> detamu_runtime::RuntimeInventory {
+    RuntimeResolver::from_environment()
+        .inventory(&[RuntimeSpec::lizard(), RuntimeSpec::rust_analyzer()])
+        .await
+}
+
+fn runtime_available(inventory: &detamu_runtime::RuntimeInventory, id: &str) -> bool {
+    inventory
+        .runtimes
+        .iter()
+        .any(|runtime| runtime.spec.id == id && runtime.available)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

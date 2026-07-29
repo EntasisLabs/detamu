@@ -831,6 +831,7 @@ dependencies = [
  "detamu-model-code",
  "detamu-query",
  "detamu-query-code",
+ "detamu-runtime",
  "detamu-sdk",
  "detamu-source-git",
  "detamu-store",
@@ -957,6 +958,14 @@ dependencies = [
  "detamu-store",
  "serde",
  "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "detamu-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "tokio",
 ]
 

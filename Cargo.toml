@@ -13,6 +13,7 @@ members = [
     "crates/detamu-model-code",
     "crates/detamu-query",
     "crates/detamu-query-code",
+    "crates/detamu-runtime",
     "crates/detamu-sdk",
     "crates/detamu-source-git",
     "crates/detamu-store",
@@ -41,6 +42,7 @@ detamu-model = { path = "crates/detamu-model" }
 detamu-model-code = { path = "crates/detamu-model-code" }
 detamu-query = { path = "crates/detamu-query" }
 detamu-query-code = { path = "crates/detamu-query-code" }
+detamu-runtime = { path = "crates/detamu-runtime" }
 detamu-source-git = { path = "crates/detamu-source-git" }
 detamu-store = { path = "crates/detamu-store" }
 serde = { version = "1", features = ["derive"] }

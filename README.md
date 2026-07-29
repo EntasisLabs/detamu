@@ -41,11 +41,12 @@ The current workspace establishes:
   and content-aware snapshot diffs;
 - a separate code query facade for source-location lookup, reverse-dependency
   impact, and explicit AVEC analysis-gap reporting;
+- portable optional-runtime discovery with bounded probes, tested-version
+  metadata, managed package roots, and machine-readable status;
 - an embeddable orchestration SDK and thin standalone engine.
 
-The next milestone is packaging semantic analyzer runtimes for predictable
-consumer deployments, followed by C# semantic support, richer import resolution,
-and ACC graph golden comparisons.
+The next milestone is a C# semantic adapter over the generic LSP host, followed
+by richer import resolution and ACC graph golden comparisons.
 
 ## Workspace
 
@@ -66,6 +67,7 @@ and ACC graph golden comparisons.
 | `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |
 | `detamu-query` | Generic snapshot lookup, filtering, traversal, and diffing |
 | `detamu-query-code` | Code location, impact, and AVEC analysis-gap queries |
+| `detamu-runtime` | Optional analyzer package discovery and status contract |
 | `detamu-sdk` | Model-agnostic orchestration facade |
 | `detamu-engine` | Standalone process and protocol host |
 
@@ -76,6 +78,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo run -p detamu-engine -- doctor
+cargo run -p detamu-engine -- runtimes
 cargo run -p detamu-engine -- init ./data/detamu.surrealkv
 cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
 cargo run -p detamu-engine -- index . ./data/detamu.surrealkv \
@@ -83,12 +86,15 @@ cargo run -p detamu-engine -- index . ./data/detamu.surrealkv \
 cargo run -p detamu-engine -- snapshots ./data/detamu.surrealkv
 ```
 
-Set `DETAMU_RUST_ANALYZER` to an explicit rust-analyzer binary when it is not
-available on `PATH`. `detamu doctor` reports whether the configured binary works.
+Set `DETAMU_RUNTIME_DIR` to a host-managed package root, or use
+`DETAMU_LIZARD` / `DETAMU_RUST_ANALYZER` for explicit executable overrides.
+`detamu runtimes` reports the resolution source, installed version, tested
+versions, and failure details as versioned JSON.
 Coverage reports are optional external evidence; Detamu consumes them but does
 not run test suites. SDK consumers can construct `CodeCoverageDeriver` from
 report bytes or filesystem paths.
 
 See [Querying Detamu](docs/QUERYING.md) for the Rust and JSON consumption
-contracts, and [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should
-remain stable as models and analyzers are added.
+contracts, [Analyzer runtimes](docs/RUNTIMES.md) for the Medousa package handoff,
+and [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain
+stable as models and analyzers are added.
