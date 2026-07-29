@@ -61,6 +61,12 @@ cargo package -p detamu --list
 cargo package -p detamu-engine --list
 ```
 
+Inspect the current release progress without uploading anything:
+
+```bash
+./scripts/publish-crates.sh status
+```
+
 ## Initial release
 
 1. Commit all release changes and ensure the worktree is clean.
@@ -74,9 +80,12 @@ DETAMU_PUBLISH=1 ./scripts/publish-crates.sh publish
 
 The script publishes in dependency order and waits for each version to appear in
 the crates.io index before publishing dependents. It refuses a dirty worktree and
-requires the `DETAMU_PUBLISH=1` guard. Crates.io releases are immutable; do not
-rerun the complete script after a partial publication without first identifying
-the last successful crate.
+requires the `DETAMU_PUBLISH=1` guard. Before each upload it checks the exact
+`crate@version` in crates.io and skips it when already published. If crates.io
+rate-limits or interrupts an initial release, wait for the reported retry time and
+run the same command again; it resumes at the first unpublished crate. A failed
+upload is also rechecked in case the registry accepted it but Cargo lost the
+response.
 
 The order is:
 

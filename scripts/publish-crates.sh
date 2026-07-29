@@ -36,10 +36,15 @@ check_workspace() {
   cargo package --workspace --no-verify --allow-dirty
 }
 
+crate_is_published() {
+  local crate="$1"
+  cargo info "${crate}@${VERSION}" --registry crates-io >/dev/null 2>&1
+}
+
 wait_for_registry() {
   local crate="$1"
   local attempts=0
-  until cargo info "${crate}@${VERSION}" --registry crates-io >/dev/null 2>&1; do
+  until crate_is_published "$crate"; do
     attempts=$((attempts + 1))
     if [[ "$attempts" -ge 30 ]]; then
       echo "Timed out waiting for ${crate}@${VERSION} to reach the crates.io index." >&2
@@ -53,6 +58,15 @@ case "$MODE" in
   check)
     check_workspace
     ;;
+  status)
+    for crate in "${CRATES[@]}"; do
+      if crate_is_published "$crate"; then
+        echo "published ${crate}@${VERSION}"
+      else
+        echo "pending   ${crate}@${VERSION}"
+      fi
+    done
+    ;;
   publish)
     if [[ "${DETAMU_PUBLISH:-}" != "1" ]]; then
       echo "Refusing to publish. Re-run with DETAMU_PUBLISH=1 after reviewing the release." >&2
@@ -64,13 +78,27 @@ case "$MODE" in
     fi
     check_workspace
     for crate in "${CRATES[@]}"; do
+      if crate_is_published "$crate"; then
+        echo "Skipping ${crate}@${VERSION}; already published."
+        continue
+      fi
       echo "Publishing ${crate}@${VERSION}"
-      cargo publish --locked -p "$crate"
+      if ! cargo publish --locked -p "$crate"; then
+        # The upload can succeed even if Cargo loses the response. Recheck the
+        # exact registry version before treating the command failure as fatal.
+        if crate_is_published "$crate"; then
+          echo "Skipping ${crate}@${VERSION}; crates.io now reports it published."
+          continue
+        fi
+        echo "Publishing stopped at ${crate}@${VERSION}." >&2
+        echo "After resolving the registry error, rerun this command; published versions will be skipped." >&2
+        exit 1
+      fi
       wait_for_registry "$crate"
     done
     ;;
   *)
-    echo "usage: scripts/publish-crates.sh [check|publish]" >&2
+    echo "usage: scripts/publish-crates.sh [check|status|publish]" >&2
     exit 2
     ;;
 esac
