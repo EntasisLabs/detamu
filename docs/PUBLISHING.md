@@ -115,9 +115,10 @@ After the release, verify the facade from outside the workspace and tag the exac
 published commit:
 
 ```bash
-cargo info detamu@0.1.0
-git tag v0.1.0
-git push origin v0.1.0
+VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
+cargo info "detamu@${VERSION}"
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
 ```
 
 ## Medousa dependency

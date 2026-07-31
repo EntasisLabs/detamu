@@ -1,4 +1,6 @@
-use detamu_core::{AnalysisCoverage, ObservationBatch};
+use detamu_core::{
+    AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ObservationBatch, ObserverProvenance,
+};
 use detamu_model::ScoringModel;
 use detamu_model_code::{
     AvecCodeScorer, CodeSymbol, DependencyType, GitOid, LanguageId, NodeKind, NodeMetrics,
@@ -140,6 +142,57 @@ async fn memory_and_surreal_implement_the_same_contract() {
         .expect("surreal memory")
         .with_write_batch_size(1);
     assert_contract(&surreal).await;
+}
+
+#[tokio::test]
+async fn ensure_schema_migrates_legacy_strict_nested_fields() {
+    let store = SurrealStore::memory("detamu_test", "legacy_schema")
+        .await
+        .expect("surreal memory");
+    store
+        .database()
+        .query(
+            r"
+            DEFINE FIELD OVERWRITE provenance ON TABLE detamu_snapshot TYPE array<object>;
+            DEFINE FIELD OVERWRITE diagnostics ON TABLE detamu_snapshot TYPE array<object>;
+            ",
+        )
+        .await
+        .expect("legacy schema definitions")
+        .check()
+        .expect("legacy schema applies");
+
+    store.ensure_schema().await.expect("schema migration");
+
+    let mut batch = fixture();
+    batch.provenance = vec![
+        ObserverProvenance {
+            observer: "git".to_owned(),
+            version: "1".to_owned(),
+            configuration_digest: None,
+            source: Some("repository".to_owned()),
+        },
+        ObserverProvenance {
+            observer: "rust-syntax".to_owned(),
+            version: "1".to_owned(),
+            configuration_digest: Some("rust-tree-sitter-v1".to_owned()),
+            source: Some("src/lib.rs".to_owned()),
+        },
+    ];
+    batch.diagnostics.push(AnalysisDiagnostic {
+        severity: DiagnosticSeverity::Warning,
+        observer: "rust-syntax".to_owned(),
+        message: "partial syntax evidence".to_owned(),
+        scope: Some("src/lib.rs".to_owned()),
+    });
+    let expected = SnapshotRecord::from(&batch);
+    let snapshot = batch.snapshot.clone();
+
+    store.ingest(batch).await.expect("ingest after migration");
+    assert_eq!(
+        store.snapshot(&snapshot).await.expect("snapshot lookup"),
+        Some(expected)
+    );
 }
 
 #[tokio::test]

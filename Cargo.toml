@@ -23,7 +23,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Entasis Labs"]
 license = "MIT OR Apache-2.0"
@@ -36,24 +36,24 @@ rust-version = "1.89"
 
 [workspace.dependencies]
 async-trait = "0.1"
-detamu = { version = "0.1.0", path = "crates/detamu" }
-detamu-code-coverage = { version = "0.1.0", path = "crates/detamu-code-coverage" }
-detamu-core = { version = "0.1.0", path = "crates/detamu-core" }
-detamu-language = { version = "0.1.0", path = "crates/detamu-language" }
-detamu-language-lizard = { version = "0.1.0", path = "crates/detamu-language-lizard" }
-detamu-language-lsp = { version = "0.1.0", path = "crates/detamu-language-lsp" }
-detamu-language-rust = { version = "0.1.0", path = "crates/detamu-language-rust" }
-detamu-language-rust-analyzer = { version = "0.1.0", path = "crates/detamu-language-rust-analyzer" }
-detamu-language-tree-sitter = { version = "0.1.0", path = "crates/detamu-language-tree-sitter" }
-detamu-model = { version = "0.1.0", path = "crates/detamu-model" }
-detamu-model-code = { version = "0.1.0", path = "crates/detamu-model-code" }
-detamu-query = { version = "0.1.0", path = "crates/detamu-query" }
-detamu-query-code = { version = "0.1.0", path = "crates/detamu-query-code" }
-detamu-runtime = { version = "0.1.0", path = "crates/detamu-runtime" }
-detamu-sdk = { version = "0.1.0", path = "crates/detamu-sdk" }
-detamu-source-git = { version = "0.1.0", path = "crates/detamu-source-git" }
-detamu-store = { version = "0.1.0", path = "crates/detamu-store" }
-detamu-surreal = { version = "0.1.0", path = "crates/detamu-surreal" }
+detamu = { version = "0.1.1", path = "crates/detamu" }
+detamu-code-coverage = { version = "0.1.1", path = "crates/detamu-code-coverage" }
+detamu-core = { version = "0.1.1", path = "crates/detamu-core" }
+detamu-language = { version = "0.1.1", path = "crates/detamu-language" }
+detamu-language-lizard = { version = "0.1.1", path = "crates/detamu-language-lizard" }
+detamu-language-lsp = { version = "0.1.1", path = "crates/detamu-language-lsp" }
+detamu-language-rust = { version = "0.1.1", path = "crates/detamu-language-rust" }
+detamu-language-rust-analyzer = { version = "0.1.1", path = "crates/detamu-language-rust-analyzer" }
+detamu-language-tree-sitter = { version = "0.1.1", path = "crates/detamu-language-tree-sitter" }
+detamu-model = { version = "0.1.1", path = "crates/detamu-model" }
+detamu-model-code = { version = "0.1.1", path = "crates/detamu-model-code" }
+detamu-query = { version = "0.1.1", path = "crates/detamu-query" }
+detamu-query-code = { version = "0.1.1", path = "crates/detamu-query-code" }
+detamu-runtime = { version = "0.1.1", path = "crates/detamu-runtime" }
+detamu-sdk = { version = "0.1.1", path = "crates/detamu-sdk" }
+detamu-source-git = { version = "0.1.1", path = "crates/detamu-source-git" }
+detamu-store = { version = "0.1.1", path = "crates/detamu-store" }
+detamu-surreal = { version = "0.1.1", path = "crates/detamu-surreal" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = "0.41"

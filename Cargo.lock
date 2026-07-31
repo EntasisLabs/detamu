@@ -799,7 +799,7 @@ checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 
 [[package]]
 name = "detamu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-core",
  "detamu-model",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-code-coverage"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-core",
  "detamu-model",
@@ -826,7 +826,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -834,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-engine"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-code-coverage",
  "detamu-core",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-model",
  "detamu-model-code",
@@ -865,7 +865,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language-lizard"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language-lsp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -889,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language-rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -905,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language-rust-analyzer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-language-tree-sitter"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-model"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-model-code"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-core",
  "detamu-model",
@@ -953,7 +953,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-query"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-core",
  "detamu-store",
@@ -965,7 +965,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-query-code"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "detamu-core",
  "detamu-model-code",
@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "tokio",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-sdk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-source-git"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-store"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
@@ -1023,7 +1023,7 @@ dependencies = [
 
 [[package]]
 name = "detamu-surreal"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "detamu-core",
