@@ -1,0 +1,24 @@
+[package]
+name = "detamu-index-and-query"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Example: index a Git repository and query code entities with Detamu"
+
+[[bin]]
+name = "detamu-index-and-query"
+path = "src/main.rs"
+
+[dependencies]
+detamu-model.workspace = true
+detamu-model-code.workspace = true
+detamu-query-code.workspace = true
+detamu-sdk.workspace = true
+detamu-source-git.workspace = true
+detamu-store.workspace = true
+detamu-language.workspace = true
+detamu-language-rust.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "examples/index-and-query",
     "crates/detamu",
     "crates/detamu-core",
     "crates/detamu-code-coverage",

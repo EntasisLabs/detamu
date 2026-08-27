@@ -1,108 +1,203 @@
 # Detamu
 
-**A versioned world-model engine, beginning with code.**
+[![crates.io](https://img.shields.io/crates/v/detamu.svg)](https://crates.io/crates/detamu)
+[![docs.rs](https://img.shields.io/docsrs/detamu)](https://docs.rs/detamu)
+[![license](https://img.shields.io/crates/l/detamu.svg)](https://github.com/EntasisLabs/detamu/blob/main/LICENSE-MIT)
 
-Detamu turns observations from bounded worlds into immutable, queryable entity
-graphs with provenance, measurements, and versioned scores. Code is the first
-world model: Detamu will reproduce ACC's repository graph and AVEC behavior before
-expanding into pull requests, issues, tickets, notes, and projects.
+**Index Git repositories into immutable, queryable code graphs.**
 
-Detamu runs as either an embeddable Rust SDK or a standalone engine. The engine
-is a thin host around the SDK; it does not contain a second implementation.
+Detamu turns observations from bounded worlds into versioned entity graphs with
+provenance, measurements, and scores. Code is the first world model: index a
+commit, persist the snapshot, then look up symbols, trace reverse dependencies,
+and score how risky each piece of code is to change.
+
+Use it as an embeddable Rust SDK or a standalone CLI. The engine is a thin host
+around the SDK — there is no second implementation.
+
+Detamu is building toward ACC-compatible repository graphs and their scoring
+behavior. It does not own agent runtimes or review workflows; host applications
+remain authoritative for users and optional analyzer package lifecycle.
+
+## What you can do today
+
+- **Index a Git repository at an immutable commit** — tracked files, rename-aware
+  history, Rust symbols via Tree-sitter, optional Lizard and rust-analyzer
+  enrichment, and external LCOV/Cobertura coverage ingestion.
+- **Query persisted snapshots** — filter entities, locate source lines, traverse
+  reverse impact, diff snapshots, and list where scoring evidence is still
+  missing instead of inventing zeros.
+- **Score code with AVEC** — four versioned dimensions for each scoreable symbol
+  (see below).
+- **Embed or shell out** — compose analyzers through the SDK, or drive the same
+  operations through JSON commands from `detamu-engine`.
+
+## Scoring (AVEC Code)
+
+AVEC Code is Detamu's built-in scoring model for the code world. When enough
+measurements exist, each symbol gets four 0–1 scores:
+
+| Dimension | Roughly answers | Drawn from |
+|---|---|---|
+| **Stability** | How settled is this code? | Churn, contributor count, test coverage |
+| **Logic** | How dense is the implementation? | Cyclomatic complexity, size, parameters |
+| **Friction** | How costly is a change here? | Graph centrality, inbound deps, history, complexity |
+| **Autonomy** | How independent is it? | Outbound dependency load |
+
+Scores are derived and versioned (`avec.code`); they are not raw analyzer output.
+If required evidence is missing — for example no call graph yet, or no coverage
+report — Detamu leaves the score out and `detamu gaps` explains why. Missing
+evidence is never treated as “safe.”
+
+## Try it in two minutes
+
+Install the CLI ([`detamu-engine`](https://crates.io/crates/detamu-engine) on
+crates.io):
+
+```bash
+cargo install detamu-engine
+detamu doctor
+detamu init ./data/detamu.surrealkv
+detamu index . ./data/detamu.surrealkv
+```
+
+`index` prints the world and snapshot identifiers you need for queries:
+
+```json
+{
+  "world": "code.repository:remote:github.com/your-org/your-repo",
+  "snapshot": "83d4ba3f003799219ec5dcf28b1bb0a303bf2693",
+  "entities": 720,
+  "relations": 757,
+  "coverage": "partial"
+}
+```
+
+Query the graph (replace placeholders with your `index` output):
+
+```bash
+detamu snapshots ./data/detamu.surrealkv
+
+detamu find ./data/detamu.surrealkv <WORLD> <SNAPSHOT> \
+  --kind function --language rust --limit 10
+
+detamu impact ./data/detamu.surrealkv <WORLD> <SNAPSHOT> <ENTITY_ID>
+
+detamu gaps ./data/detamu.surrealkv <WORLD> <SNAPSHOT>
+```
+
+Index a specific commit without checking it out:
+
+```bash
+detamu index . ./data/detamu.surrealkv --revision abc123def
+```
+
+Optional analyzers (Lizard, rust-analyzer) are discovered from the environment
+or a host-managed package directory — they are not bundled. See
+[Analyzer runtimes](docs/RUNTIMES.md).
+
+Full walkthrough: [Getting started](docs/GETTING_STARTED.md).
+
+## Use it in Rust
 
 ```toml
 [dependencies]
 detamu = { version = "0.1", features = ["code", "runtime", "surreal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-## Status
+Feature flags are additive: `query` and `runtime` (defaults), plus `code`,
+`surreal`, or `full` for everything.
 
-The current workspace establishes:
+Runnable example from this repository:
 
-- a world-model-agnostic kernel for snapshots, entities, relations, observations,
-  measurements, provenance, and scores;
-- model analyzer, scoring, and pack extension contracts;
-- a strongly typed code model containing Git identity, symbols, dependencies,
-  ACC metrics, and AVEC Code;
-- deterministic Git repository discovery, immutable commit snapshots, and
-  tracked-file language inventory;
-- rename-aware bulk Git history with contributor, churn, timing, and recent
-  frequency evidence anchored to each snapshot;
-- immutable artifact access and a reusable Tree-sitter host, with a Rust pack
-  producing types, functions, methods, imports, syntax metrics, and containment;
-- an optional Lizard compatibility adapter for broad baseline language coverage;
-- a generic, process-isolated LSP lifecycle and JSON-RPC transport for future
-  semantic language adapters;
-- an optional rust-analyzer adapter that materializes the complete immutable Git
-  tree and normalizes workspace references and calls into code relations;
-- a reconciled-batch derivation stage producing graph degree measurements before
-  AVEC scoring;
-- typed analyzer capabilities, optional-tool degradation, and per-measurement
-  provenance/confidence for deterministic multi-analyzer reconciliation;
-- generic storage with an in-memory behavioral reference;
-- native SurrealDB and persistent SurrealKV storage with transactional bulk
-  snapshot replacement;
-- deterministic snapshot enumeration, entity filtering, bounded graph traversal,
-  and content-aware snapshot diffs;
-- a separate code query facade for source-location lookup, reverse-dependency
-  impact, and explicit AVEC analysis-gap reporting;
-- portable optional-runtime discovery with bounded probes, tested-version
-  metadata, managed package roots, and machine-readable status;
-- an embeddable orchestration SDK and thin standalone engine.
+```bash
+cargo run -p detamu-index-and-query -- .
+```
 
-The next milestone is a C# semantic adapter over the generic LSP host, followed
-by richer import resolution and ACC graph golden comparisons.
+See [examples/](examples/) and [Querying Detamu](docs/QUERYING.md) for embedded
+and JSON consumption contracts.
 
-## Workspace
+## How it works
 
-| Crate | Responsibility |
+```mermaid
+flowchart LR
+  Git[Git commit] --> Source[World source]
+  Source --> Analyzers[Model analyzers]
+  Analyzers --> Batch[Normalized observations]
+  Batch --> Derive[Derivation and scoring]
+  Derive --> Store[(Snapshot store)]
+  Store --> Query[Query facades]
+  Query --> SDK[Rust SDK]
+  Query --> CLI[JSON CLI]
+```
+
+World sources resolve an immutable revision. Analyzers emit normalized
+observations; optional tools degrade gracefully. Derivers attach graph metrics
+and coverage; AVEC Code then scores symbols that have enough evidence. The store
+commits each snapshot atomically. Generic and code-aware query facades read the
+same persisted graph.
+
+Details: [Architecture](ARCHITECTURE.md).
+
+## Project status
+
+**Works well**
+
+- Git snapshot identity, tracked-file inventory, and bulk rename-aware history.
+- In-process Rust Tree-sitter analysis without optional runtimes.
+- SurrealKV persistence, snapshot listing, entity search, impact traversal,
+  content-aware diffs, and scoring gap reports.
+- Optional Lizard, rust-analyzer, and coverage report ingestion.
+
+**Partial or optional**
+
+- AVEC Code only scores when required measurements exist; incomplete analysis is
+  reported by `gaps` rather than filled with zeros.
+- Broad multi-language metrics depend on an installed Lizard binary.
+- Call graphs and references depend on rust-analyzer when available.
+
+**Next**
+
+- C# semantic adapter over the generic LSP host.
+- Richer import resolution and ACC graph golden comparisons.
+
+## Documentation
+
+| Doc | Contents |
 |---|---|
-| `detamu` | Public facade with additive query, code, runtime, and Surreal features |
-| `detamu-core` | World-model-agnostic kernel types |
-| `detamu-model` | Analyzer, scoring-model, and world-model-pack contracts |
-| `detamu-model-code` | Code ontology, Git identity, metrics, and AVEC Code |
-| `detamu-code-coverage` | LCOV and Cobertura evidence mapped onto code entities |
-| `detamu-language` | Language extensions within the code model |
-| `detamu-language-tree-sitter` | Shared immutable-artifact parsing lifecycle |
-| `detamu-language-rust` | Rust symbols, hierarchy, and syntax complexity |
-| `detamu-language-rust-analyzer` | Optional Rust references and call graph |
-| `detamu-language-lizard` | Optional broad-coverage ACC metrics compatibility |
-| `detamu-language-lsp` | Generic LSP stdio lifecycle and adapter boundary |
-| `detamu-source-git` | Git discovery, snapshot resolution, and tracked-file inventory |
-| `detamu-store` | Generic storage port and in-memory reference |
-| `detamu-surreal` | Native in-memory SurrealDB and persistent SurrealKV backend |
-| `detamu-query` | Generic snapshot lookup, filtering, traversal, and diffing |
-| `detamu-query-code` | Code location, impact, and AVEC analysis-gap queries |
-| `detamu-runtime` | Optional analyzer package discovery and status contract |
-| `detamu-sdk` | Model-agnostic orchestration facade |
-| `detamu-engine` | Standalone process and protocol host |
+| [Getting started](docs/GETTING_STARTED.md) | CLI install, SDK setup, coverage, persistence |
+| [Querying Detamu](docs/QUERYING.md) | Rust facades and JSON command protocol |
+| [Analyzer runtimes](docs/RUNTIMES.md) | Optional executable discovery and host packages |
+| [Architecture](ARCHITECTURE.md) | Kernel boundaries, analyzers, storage, roadmap |
+| [Publishing](docs/PUBLISHING.md) | crates.io release procedure |
+| [Contributing](CONTRIBUTING.md) | Checks, constraints, and pull request expectations |
+| [Examples](examples/) | Runnable workspace examples |
+
+## Key crates
+
+Most consumers should start with these:
+
+| Crate | Role |
+|---|---|
+| [`detamu`](https://crates.io/crates/detamu) | Public facade (`code`, `query`, `runtime`, `surreal` features) |
+| [`detamu-engine`](https://crates.io/crates/detamu-engine) | Standalone CLI and JSON protocol host |
+| [`detamu-sdk`](https://crates.io/crates/detamu-sdk) | Model-agnostic orchestration for embedders |
+| [`detamu-source-git`](https://crates.io/crates/detamu-source-git) | Git repository source adapter |
+
+The workspace also contains kernel types, the code ontology, language adapters,
+storage backends, and query facades. See [Architecture](ARCHITECTURE.md) for the
+full crate map and dependency direction.
 
 ## Development
 
 ```bash
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo run -p detamu-engine -- doctor
-cargo run -p detamu-engine -- runtimes
-cargo run -p detamu-engine -- init ./data/detamu.surrealkv
-cargo run -p detamu-engine -- index . ./data/detamu.surrealkv
-cargo run -p detamu-engine -- index . ./data/detamu.surrealkv \
-  --coverage ./coverage/lcov.info --coverage ./coverage/cobertura.xml
-cargo run -p detamu-engine -- snapshots ./data/detamu.surrealkv
-./scripts/publish-crates.sh check
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Set `DETAMU_RUNTIME_DIR` to a host-managed package root, or use
-`DETAMU_LIZARD` / `DETAMU_RUST_ANALYZER` for explicit executable overrides.
-`detamu runtimes` reports the resolution source, installed version, tested
-versions, and failure details as versioned JSON.
-Coverage reports are optional external evidence; Detamu consumes them but does
-not run test suites. SDK consumers can construct `CodeCoverageDeriver` from
-report bytes or filesystem paths.
+See [Contributing](CONTRIBUTING.md) for formatting, architecture constraints,
+and release checks.
 
-See [Querying Detamu](docs/QUERYING.md) for the Rust and JSON consumption
-contracts, [Analyzer runtimes](docs/RUNTIMES.md) for the Medousa package handoff,
-[Publishing](docs/PUBLISHING.md) for the crates.io release procedure, and
-[ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain stable
-as models and analyzers are added.
+## License
+
+Detamu is dual-licensed under [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).
