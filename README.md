@@ -9,13 +9,12 @@
 Detamu turns observations from bounded worlds into versioned entity graphs with
 provenance, measurements, and scores. Code is the first world model: index a
 commit, persist the snapshot, then look up symbols, trace reverse dependencies,
-and inspect AVEC risk scores with explicit gap reporting when evidence is
-incomplete.
+and score how risky each piece of code is to change.
 
 Use it as an embeddable Rust SDK or a standalone CLI. The engine is a thin host
 around the SDK — there is no second implementation.
 
-Detamu is building toward ACC-compatible repository graphs and AVEC scoring
+Detamu is building toward ACC-compatible repository graphs and their scoring
 behavior. It does not own agent runtimes or review workflows; host applications
 remain authoritative for users and optional analyzer package lifecycle.
 
@@ -25,10 +24,29 @@ remain authoritative for users and optional analyzer package lifecycle.
   history, Rust symbols via Tree-sitter, optional Lizard and rust-analyzer
   enrichment, and external LCOV/Cobertura coverage ingestion.
 - **Query persisted snapshots** — filter entities, locate source lines, traverse
-  reverse impact, diff snapshots, and report missing AVEC evidence instead of
-  treating gaps as zero risk.
+  reverse impact, diff snapshots, and list where scoring evidence is still
+  missing instead of inventing zeros.
+- **Score code with AVEC** — four versioned dimensions for each scoreable symbol
+  (see below).
 - **Embed or shell out** — compose analyzers through the SDK, or drive the same
   operations through JSON commands from `detamu-engine`.
+
+## Scoring (AVEC Code)
+
+AVEC Code is Detamu's built-in scoring model for the code world. When enough
+measurements exist, each symbol gets four 0–1 scores:
+
+| Dimension | Roughly answers | Drawn from |
+|---|---|---|
+| **Stability** | How settled is this code? | Churn, contributor count, test coverage |
+| **Logic** | How dense is the implementation? | Cyclomatic complexity, size, parameters |
+| **Friction** | How costly is a change here? | Graph centrality, inbound deps, history, complexity |
+| **Autonomy** | How independent is it? | Outbound dependency load |
+
+Scores are derived and versioned (`avec.code`); they are not raw analyzer output.
+If required evidence is missing — for example no call graph yet, or no coverage
+report — Detamu leaves the score out and `detamu gaps` explains why. Missing
+evidence is never treated as “safe.”
 
 ## Try it in two minutes
 
@@ -114,9 +132,10 @@ flowchart LR
 ```
 
 World sources resolve an immutable revision. Analyzers emit normalized
-observations; optional tools degrade gracefully. Derivers and scoring models
-attach measurements and AVEC scores. The store commits each snapshot atomically.
-Generic and code-aware query facades read the same persisted graph.
+observations; optional tools degrade gracefully. Derivers attach graph metrics
+and coverage; AVEC Code then scores symbols that have enough evidence. The store
+commits each snapshot atomically. Generic and code-aware query facades read the
+same persisted graph.
 
 Details: [Architecture](ARCHITECTURE.md).
 
@@ -127,13 +146,13 @@ Details: [Architecture](ARCHITECTURE.md).
 - Git snapshot identity, tracked-file inventory, and bulk rename-aware history.
 - In-process Rust Tree-sitter analysis without optional runtimes.
 - SurrealKV persistence, snapshot listing, entity search, impact traversal,
-  content-aware diffs, and AVEC gap reports.
+  content-aware diffs, and scoring gap reports.
 - Optional Lizard, rust-analyzer, and coverage report ingestion.
 
 **Partial or optional**
 
-- AVEC scores require complete evidence; missing semantic or coverage data is
-  reported explicitly rather than scored as zero.
+- AVEC Code only scores when required measurements exist; incomplete analysis is
+  reported by `gaps` rather than filled with zeros.
 - Broad multi-language metrics depend on an installed Lizard binary.
 - Call graphs and references depend on rust-analyzer when available.
 

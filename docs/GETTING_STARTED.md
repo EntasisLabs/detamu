@@ -2,7 +2,8 @@
 
 Detamu turns observations from bounded worlds into immutable, queryable entity
 graphs. Code is the first world model: index a Git repository, persist the
-snapshot, and query symbols, dependencies, and AVEC scores.
+snapshot, and query symbols, dependencies, and versioned change-risk scores
+(AVEC Code: stability, logic, friction, autonomy).
 
 This guide covers the standalone CLI and an embedded Rust workflow. For deeper
 contracts see [Querying Detamu](QUERYING.md), [Analyzer runtimes](RUNTIMES.md),
@@ -43,7 +44,7 @@ detamu snapshots ./data/detamu.surrealkv
 detamu find ./data/detamu.surrealkv <WORLD> <SNAPSHOT> \
   --kind function --language rust --limit 10
 
-# Explain missing AVEC evidence (common when rust-analyzer is absent)
+# Explain where scoring evidence is still missing (common without rust-analyzer)
 detamu gaps ./data/detamu.surrealkv <WORLD> <SNAPSHOT>
 ```
 
@@ -108,7 +109,7 @@ The example:
 
 1. resolves the repository at `HEAD` through `detamu-source-git`;
 2. runs the Git inventory and Tree-sitter Rust analyzers;
-3. scores entities with AVEC Code;
+3. scores entities with AVEC Code (stability, logic, friction, autonomy);
 4. queries Rust functions from the resulting snapshot.
 
 Optional analyzers (Lizard, rust-analyzer) are omitted so the example runs
@@ -139,7 +140,7 @@ Pass the store to `Detamu::builder` and the query facades as `Arc<dyn DetamuStor
 Detamu exposes the same persisted world through:
 
 - **Rust facades** — `detamu-query` for generic graph operations,
-  `detamu-query-code` for source locations, reverse impact, and AVEC gap reports;
+  `detamu-query-code` for source locations, reverse impact, and scoring gap reports;
 - **JSON commands** — `detamu snapshots`, `find`, `impact`, `diff`, and `gaps`
   for non-Rust clients.
 
@@ -151,8 +152,8 @@ Detamu 0.1 is a working foundation, not a finished ACC drop-in:
 
 - Rust Tree-sitter analysis runs in-process without optional runtimes.
 - Lizard and rust-analyzer deepen metrics and call graphs when installed.
-- AVEC scores require complete evidence; missing semantic or coverage data is
-  reported explicitly rather than treated as zero risk.
+- AVEC Code scores require complete evidence; missing semantic or coverage data
+  is reported explicitly rather than treated as zero risk.
 - The next milestones are C# semantic analysis, richer import resolution, and
   ACC golden comparisons.
 
