@@ -1,5 +1,9 @@
 # Detamu
 
+[![crates.io](https://img.shields.io/crates/v/detamu.svg)](https://crates.io/crates/detamu)
+[![docs.rs](https://img.shields.io/docsrs/detamu)](https://docs.rs/detamu)
+[![license](https://img.shields.io/crates/l/detamu.svg)](https://github.com/EntasisLabs/detamu/blob/main/LICENSE-MIT)
+
 **A versioned world-model engine, beginning with code.**
 
 Detamu turns observations from bounded worlds into immutable, queryable entity
@@ -10,10 +14,33 @@ expanding into pull requests, issues, tickets, notes, and projects.
 Detamu runs as either an embeddable Rust SDK or a standalone engine. The engine
 is a thin host around the SDK; it does not contain a second implementation.
 
+## Quick start
+
+Install the CLI:
+
+```bash
+cargo install detamu-engine
+detamu init ./data/detamu.surrealkv
+detamu index . ./data/detamu.surrealkv
+detamu snapshots ./data/detamu.surrealkv
+```
+
+Embed the SDK:
+
 ```toml
 [dependencies]
 detamu = { version = "0.1", features = ["code", "runtime", "surreal"] }
 ```
+
+Run the in-memory example against this repository:
+
+```bash
+cargo run -p detamu-index-and-query -- .
+```
+
+See [Getting started](docs/GETTING_STARTED.md) for the full CLI and SDK walkthrough,
+[examples/](examples/) for runnable code, and [Contributing](CONTRIBUTING.md) if
+you want to hack on the workspace.
 
 ## Status
 
@@ -106,3 +133,7 @@ contracts, [Analyzer runtimes](docs/RUNTIMES.md) for the Medousa package handoff
 [Publishing](docs/PUBLISHING.md) for the crates.io release procedure, and
 [ARCHITECTURE.md](ARCHITECTURE.md) for the boundaries that should remain stable
 as models and analyzers are added.
+
+## License
+
+Detamu is dual-licensed under [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).

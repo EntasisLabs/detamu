@@ -35,8 +35,8 @@ cargo install detamu-engine
 
 ## Preflight
 
-The namespace was unclaimed when the initial release was prepared. Recheck before
-the first publish:
+The workspace crates are published on [crates.io](https://crates.io/crates/detamu).
+Before a new release, confirm the target version is still available:
 
 ```bash
 cargo search detamu --limit 100

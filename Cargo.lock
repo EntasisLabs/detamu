@@ -856,6 +856,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "detamu-index-and-query"
+version = "0.0.0"
+dependencies = [
+ "detamu-language",
+ "detamu-language-rust",
+ "detamu-model",
+ "detamu-model-code",
+ "detamu-query-code",
+ "detamu-sdk",
+ "detamu-source-git",
+ "detamu-store",
+ "tokio",
+]
+
+[[package]]
 name = "detamu-language"
 version = "0.1.1"
 dependencies = [
