@@ -1,7 +1,7 @@
 //! World-model-agnostic read facade for persisted Detamu snapshots.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -194,58 +194,60 @@ impl SnapshotQuery {
         if request.max_nodes == 0 {
             return Err(QueryError::InvalidNodeLimit);
         }
-        let entities = self
-            .store
-            .entities(snapshot)
-            .await?
-            .into_iter()
-            .map(|observation| (observation.entity.id.clone(), observation))
-            .collect::<BTreeMap<_, _>>();
-        if !entities.contains_key(&request.root) {
+        let Some(root) = self.store.entity(snapshot, &request.root).await? else {
             return Err(QueryError::EntityNotFound {
                 entity: request.root.clone(),
             });
-        }
-        let relations = self.store.snapshot_relations(snapshot).await?;
+        };
         let mut depths = HashMap::from([(request.root.clone(), 0_u32)]);
+        let mut nodes = vec![TraversedEntity {
+            depth: 0,
+            observation: root,
+        }];
         let mut queue = VecDeque::from([request.root.clone()]);
-        let mut traversed_relations = BTreeSet::new();
+        let mut seen_relations = HashSet::new();
+        let mut relations = Vec::new();
         let mut truncated = false;
         while let Some(entity) = queue.pop_front() {
             let depth = depths[&entity];
             if depth >= request.max_depth {
                 continue;
             }
-            for relation in relations.iter().filter(|relation| {
-                request.relation_kinds.is_empty()
-                    || request.relation_kinds.contains(&relation.relation.kind)
-            }) {
-                let Some(next) = connected_entity(relation, &entity, request.direction) else {
-                    continue;
-                };
-                if !entities.contains_key(next) {
+            for relation in self
+                .store
+                .relations(snapshot, &entity, request.direction)
+                .await?
+            {
+                if !(request.relation_kinds.is_empty()
+                    || request.relation_kinds.contains(&relation.relation.kind))
+                {
                     continue;
                 }
-                if depths.len() >= request.max_nodes && !depths.contains_key(next) {
+                let Some(next) = connected_entity(&relation, &entity, request.direction).cloned()
+                else {
+                    continue;
+                };
+                let known = depths.contains_key(&next);
+                if !known && depths.len() >= request.max_nodes {
                     truncated = true;
                     continue;
                 }
-                traversed_relations.insert(relation.relation.id.clone());
-                if !depths.contains_key(next) {
+                if !known {
+                    let Some(observation) = self.store.entity(snapshot, &next).await? else {
+                        continue;
+                    };
                     depths.insert(next.clone(), depth.saturating_add(1));
-                    queue.push_back(next.clone());
+                    queue.push_back(next);
+                    nodes.push(TraversedEntity {
+                        depth: depth.saturating_add(1),
+                        observation,
+                    });
+                }
+                if seen_relations.insert(relation.relation.id.clone()) {
+                    relations.push(relation);
                 }
             }
         }
-        let mut nodes = depths
-            .into_iter()
-            .filter_map(|(id, depth)| {
-                entities
-                    .get(&id)
-                    .cloned()
-                    .map(|observation| TraversedEntity { depth, observation })
-            })
-            .collect::<Vec<_>>();
         nodes.sort_by(|left, right| {
             left.depth.cmp(&right.depth).then_with(|| {
                 left.observation
@@ -255,10 +257,7 @@ impl SnapshotQuery {
                     .cmp(right.observation.entity.id.as_str())
             })
         });
-        let relations = relations
-            .into_iter()
-            .filter(|relation| traversed_relations.contains(&relation.relation.id))
-            .collect();
+        relations.sort_by(|left, right| left.relation.id.as_str().cmp(right.relation.id.as_str()));
         Ok(GraphTraversal {
             schema_version: QUERY_SCHEMA_VERSION,
             snapshot: snapshot.clone(),
@@ -499,7 +498,7 @@ mod tests {
         assert_eq!(diff.changed_entities[0].id.as_str(), "b");
         assert_eq!(diff.added_relations.len(), 1);
         assert_eq!(diff.removed_relations.len(), 2);
-        assert!(diff.changed_relations.is_empty());
+        assert_eq!(diff.changed_relations, []);
     }
 
     async fn fixture_store() -> (Arc<InMemoryStore>, SnapshotId, SnapshotId) {

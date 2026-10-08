@@ -5,7 +5,7 @@ use detamu_language::LanguagePack;
 use detamu_language_lizard::LizardAnalyzer;
 use detamu_language_rust::RustLanguagePack;
 use detamu_language_rust_analyzer::RustAnalyzer;
-use detamu_model::SourceRequest;
+use detamu_model::{ArtifactReader, SourceRequest};
 use detamu_model_code::{AvecCodeScorer, GraphMetricsDeriver};
 use detamu_runtime::{RuntimeResolver, RuntimeSpec};
 use detamu_sdk::Detamu;
@@ -152,7 +152,8 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
             return ExitCode::FAILURE;
         }
     };
-    let rust = RustLanguagePack::new(Arc::new(GitRepositorySource));
+    let source: Arc<dyn ArtifactReader> = Arc::new(GitRepositorySource);
+    let rust = RustLanguagePack::new(Arc::clone(&source));
     let resolver = RuntimeResolver::from_environment();
     let lizard_runtime = resolver.resolve(&RuntimeSpec::lizard()).await;
     let rust_analyzer_runtime = resolver.resolve(&RuntimeSpec::rust_analyzer()).await;
@@ -160,12 +161,11 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
         .analyzer(Arc::new(GitRepositoryAnalyzer))
         .analyzers(rust.analyzers())
         .analyzer(Arc::new(LizardAnalyzer::with_executable(
-            Arc::new(GitRepositorySource),
+            Arc::clone(&source),
             lizard_runtime.executable,
         )))
         .analyzer(Arc::new(
-            RustAnalyzer::new(Arc::new(GitRepositorySource))
-                .with_executable(rust_analyzer_runtime.executable),
+            RustAnalyzer::new(source).with_executable(rust_analyzer_runtime.executable),
         ))
         .deriver(Arc::new(GraphMetricsDeriver));
     if let Some(coverage) = coverage {

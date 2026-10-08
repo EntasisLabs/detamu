@@ -74,3 +74,7 @@ all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
+# `async-trait` marks desugared methods `#[must_use]` without a reason, and
+# their boxed futures are already must-use. Current stable Clippy flags that
+# pair; the attribute is not ours to edit.
+double_must_use = "allow"

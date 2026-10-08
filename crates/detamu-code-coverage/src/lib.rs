@@ -537,7 +537,7 @@ mod tests {
         assert_ratio(&batch, "test.line_coverage", 2.0 / 3.0);
         assert_ratio(&batch, "test.branch_coverage", 0.5);
         assert_eq!(batch.provenance[0].observer, OBSERVER);
-        assert!(batch.diagnostics.is_empty());
+        assert_eq!(batch.diagnostics, []);
     }
 
     #[test]
@@ -607,7 +607,7 @@ mod tests {
         .filter(|measurement| !measurement.name.starts_with("test."))
         .collect();
 
-        assert!(batch.entities[0].scores.is_empty());
+        assert_eq!(batch.entities[0].scores, []);
         deriver.derive(&mut batch).expect("derive coverage");
         AvecCodeScorer::default()
             .score(&mut batch)

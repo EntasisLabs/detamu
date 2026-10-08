@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use detamu_core::{ModelId, ObservationBatch, Score, ScoreModelId};
 use detamu_model::{ScoringError, ScoringModel, ScoringModelDescriptor};
 use serde::{Deserialize, Serialize};
@@ -198,9 +200,14 @@ impl ScoringModel for AvecCodeScorer {
     }
 }
 
+fn avec_score_model() -> ScoreModelId {
+    static MODEL: OnceLock<ScoreModelId> = OnceLock::new();
+    MODEL.get_or_init(|| ScoreModelId::new("avec.code")).clone()
+}
+
 fn score(version: u32, dimension: &str, value: f64) -> Score {
     Score {
-        model: ScoreModelId::new("avec.code"),
+        model: avec_score_model(),
         version,
         dimension: dimension.to_owned(),
         value,

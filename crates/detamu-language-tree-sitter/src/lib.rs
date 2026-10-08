@@ -4,12 +4,13 @@ use std::{path::Path, sync::Arc};
 
 use async_trait::async_trait;
 use detamu_core::{
-    AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ModelId, ObservationBatch,
-    ObserverProvenance,
+    AnalysisCoverage, AnalysisDiagnostic, DiagnosticSeverity, ModelId, ObservationAccumulator,
+    ObservationBatch, ObserverProvenance,
 };
 use detamu_model::{
-    AnalysisInput, AnalyzerCapability, AnalyzerDescriptor, AnalyzerError, AnalyzerExecution,
-    Artifact, ArtifactReader, ModelAnalyzer,
+    ARTIFACT_READ_BUDGET_BYTES, AnalysisInput, AnalyzerCapability, AnalyzerDescriptor,
+    AnalyzerError, AnalyzerExecution, Artifact, ArtifactReader, ModelAnalyzer,
+    artifact_read_groups,
 };
 use detamu_model_code::{CODE_MODEL_ID, GitOid, LanguageId, RepositoryId, RevisionId};
 use tree_sitter::{Language, Node, Parser};
@@ -79,65 +80,92 @@ impl<S: TreeSitterSpec> ModelAnalyzer for TreeSitterAnalyzer<S> {
             .into_iter()
             .filter(|artifact| supports_artifact(self.spec.as_ref(), artifact))
             .collect::<Vec<_>>();
-        let contents = self
-            .artifacts
-            .read_many(source, &artifacts)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
         let revision = revision(input)?;
-        let spec = self.spec.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut parser = Parser::new();
-            parser.set_language(&spec.grammar()).map_err(|error| {
+        let mut accumulated = ObservationAccumulator::new(revision.snapshot());
+        accumulated.set_coverage(AnalysisCoverage::Partial);
+        accumulated.push_provenance(ObserverProvenance {
+            observer: self.spec.observer().to_owned(),
+            version: self.spec.version().to_owned(),
+            configuration_digest: Some(self.spec.configuration_digest().to_owned()),
+            source: None,
+        });
+        for group in artifact_read_groups(&artifacts, ARTIFACT_READ_BUDGET_BYTES) {
+            let contents = self
+                .artifacts
+                .read_many(source, &artifacts[group])
+                .await
+                .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
+            let spec = Arc::clone(&self.spec);
+            let revision = revision.clone();
+            let observations = tokio::task::spawn_blocking(move || {
+                observe_contents(spec.as_ref(), &revision, contents)
+            })
+            .await
+            .map_err(|error| {
+                AnalyzerError::Failed(format!("Tree-sitter task failed: {error}"))
+            })??;
+            accumulated.merge(observations).map_err(|_| {
                 AnalyzerError::Failed(format!(
-                    "load {} grammar: {error}",
-                    spec.language().as_str()
+                    "{} emitted conflicting observations",
+                    self.spec.observer()
                 ))
             })?;
-            let mut batch = ObservationBatch::empty(revision.snapshot());
-            batch.coverage = AnalysisCoverage::Partial;
-            batch.provenance.push(ObserverProvenance {
-                observer: spec.observer().to_owned(),
-                version: spec.version().to_owned(),
-                configuration_digest: Some(spec.configuration_digest().to_owned()),
-                source: None,
-            });
-            for content in contents {
-                let Some(tree) = parser.parse(&content.bytes, None) else {
-                    batch.diagnostics.push(diagnostic(
-                        spec.observer(),
-                        &content.artifact.path,
-                        "Tree-sitter did not produce a syntax tree",
-                    ));
-                    continue;
-                };
-                if tree.root_node().has_error() {
-                    batch.diagnostics.push(diagnostic(
-                        spec.observer(),
-                        &content.artifact.path,
-                        "source contains syntax errors; observations may be incomplete",
-                    ));
-                }
-                let mut observations = ObservationBatch::empty(revision.snapshot());
-                spec.observe_tree(
-                    &revision,
-                    &content.artifact,
-                    &content.bytes,
-                    tree.root_node(),
-                    &mut observations,
-                );
-                batch.merge(observations).map_err(|_| {
-                    AnalyzerError::Failed(format!(
-                        "{} emitted conflicting observations",
-                        spec.observer()
-                    ))
-                })?;
-            }
-            Ok(batch)
-        })
-        .await
-        .map_err(|error| AnalyzerError::Failed(format!("Tree-sitter task failed: {error}")))?
+        }
+        Ok(accumulated.finish())
     }
+}
+
+fn observe_contents<S: TreeSitterSpec>(
+    spec: &S,
+    revision: &RevisionId,
+    contents: Vec<detamu_model::ArtifactContent>,
+) -> Result<ObservationBatch, AnalyzerError> {
+    let mut parser = Parser::new();
+    parser.set_language(&spec.grammar()).map_err(|error| {
+        AnalyzerError::Failed(format!(
+            "load {} grammar: {error}",
+            spec.language().as_str()
+        ))
+    })?;
+    let mut accumulated = ObservationAccumulator::new(revision.snapshot());
+    for content in contents {
+        let mut observations = ObservationBatch::empty(revision.snapshot());
+        let Some(tree) = parser.parse(&content.bytes, None) else {
+            observations.diagnostics.push(diagnostic(
+                spec.observer(),
+                &content.artifact.path,
+                "Tree-sitter did not produce a syntax tree",
+            ));
+            accumulated.merge(observations).map_err(|_| {
+                AnalyzerError::Failed(format!(
+                    "{} emitted conflicting observations",
+                    spec.observer()
+                ))
+            })?;
+            continue;
+        };
+        if tree.root_node().has_error() {
+            observations.diagnostics.push(diagnostic(
+                spec.observer(),
+                &content.artifact.path,
+                "source contains syntax errors; observations may be incomplete",
+            ));
+        }
+        spec.observe_tree(
+            revision,
+            &content.artifact,
+            &content.bytes,
+            tree.root_node(),
+            &mut observations,
+        );
+        accumulated.merge(observations).map_err(|_| {
+            AnalyzerError::Failed(format!(
+                "{} emitted conflicting observations",
+                spec.observer()
+            ))
+        })?;
+    }
+    Ok(accumulated.finish())
 }
 
 fn supports_artifact(spec: &dyn TreeSitterSpec, artifact: &Artifact) -> bool {

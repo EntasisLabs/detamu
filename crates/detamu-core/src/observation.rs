@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -136,46 +136,107 @@ impl ObservationBatch {
     ///
     /// Returns [`BatchMismatch`] when the batches describe different snapshots
     /// or use different commit semantics.
-    pub fn merge(&mut self, mut other: Self) -> Result<(), BatchMismatch> {
-        if self.snapshot != other.snapshot {
-            return Err(BatchMismatch::new("batches describe different snapshots"));
+    pub fn merge(&mut self, other: Self) -> Result<(), BatchMismatch> {
+        let mut entities = HashMap::with_capacity(self.entities.len());
+        for (index, observation) in self.entities.iter().enumerate() {
+            entities
+                .entry(observation.entity.id.clone())
+                .or_insert(index);
         }
-        if self.commit_mode != other.commit_mode {
-            return Err(BatchMismatch::new("batches use different commit semantics"));
+        let mut relations = HashMap::with_capacity(self.relations.len());
+        for (index, observation) in self.relations.iter().enumerate() {
+            relations
+                .entry(observation.relation.id.clone())
+                .or_insert(index);
         }
-
-        self.provenance.append(&mut other.provenance);
-        for observation in other.entities {
-            if let Some(existing) = self
-                .entities
-                .iter_mut()
-                .find(|existing| existing.entity.id == observation.entity.id)
-            {
-                merge_entity(existing, observation)?;
-            } else {
-                self.entities.push(observation);
-            }
-        }
-        for observation in other.relations {
-            if let Some(existing) = self
-                .relations
-                .iter()
-                .find(|existing| existing.relation.id == observation.relation.id)
-            {
-                if existing != &observation {
-                    return Err(BatchMismatch::new(format!(
-                        "relation {} has conflicting observations",
-                        observation.relation.id
-                    )));
-                }
-            } else {
-                self.relations.push(observation);
-            }
-        }
-        self.diagnostics.append(&mut other.diagnostics);
-        self.coverage = merge_coverage(self.coverage, other.coverage);
-        Ok(())
+        merge_indexed(self, &mut entities, &mut relations, other)
     }
+}
+
+/// Merges many observation batches while keeping entity and relation indexes.
+///
+/// Building the index once matters when analyzers reconcile a file at a time.
+/// A linear scan of the growing snapshot is quadratic in repository size and
+/// keeps both batches alive for the whole scan.
+pub struct ObservationAccumulator {
+    batch: ObservationBatch,
+    entities: HashMap<EntityId, usize>,
+    relations: HashMap<RelationId, usize>,
+}
+
+impl ObservationAccumulator {
+    pub fn new(snapshot: SnapshotId) -> Self {
+        Self {
+            batch: ObservationBatch::empty(snapshot),
+            entities: HashMap::new(),
+            relations: HashMap::new(),
+        }
+    }
+
+    pub fn set_coverage(&mut self, coverage: AnalysisCoverage) {
+        self.batch.coverage = coverage;
+    }
+
+    pub fn push_provenance(&mut self, provenance: ObserverProvenance) {
+        self.batch.provenance.push(provenance);
+    }
+
+    /// # Errors
+    ///
+    /// Returns [`BatchMismatch`] when `other` disagrees with observations
+    /// already accumulated for the same entity or relation.
+    pub fn merge(&mut self, other: ObservationBatch) -> Result<(), BatchMismatch> {
+        merge_indexed(
+            &mut self.batch,
+            &mut self.entities,
+            &mut self.relations,
+            other,
+        )
+    }
+
+    pub fn finish(self) -> ObservationBatch {
+        self.batch
+    }
+}
+
+fn merge_indexed(
+    batch: &mut ObservationBatch,
+    entities: &mut HashMap<EntityId, usize>,
+    relations: &mut HashMap<RelationId, usize>,
+    mut other: ObservationBatch,
+) -> Result<(), BatchMismatch> {
+    if batch.snapshot != other.snapshot {
+        return Err(BatchMismatch::new("batches describe different snapshots"));
+    }
+    if batch.commit_mode != other.commit_mode {
+        return Err(BatchMismatch::new("batches use different commit semantics"));
+    }
+
+    batch.provenance.append(&mut other.provenance);
+    for observation in other.entities {
+        if let Some(&index) = entities.get(&observation.entity.id) {
+            merge_entity(&mut batch.entities[index], observation)?;
+        } else {
+            entities.insert(observation.entity.id.clone(), batch.entities.len());
+            batch.entities.push(observation);
+        }
+    }
+    for observation in other.relations {
+        if let Some(&index) = relations.get(&observation.relation.id) {
+            if batch.relations[index] != observation {
+                return Err(BatchMismatch::new(format!(
+                    "relation {} has conflicting observations",
+                    observation.relation.id
+                )));
+            }
+        } else {
+            relations.insert(observation.relation.id.clone(), batch.relations.len());
+            batch.relations.push(observation);
+        }
+    }
+    batch.diagnostics.append(&mut other.diagnostics);
+    batch.coverage = merge_coverage(batch.coverage, other.coverage);
+    Ok(())
 }
 
 fn merge_entity(
@@ -358,5 +419,27 @@ mod tests {
         left.merge(right).expect("merge concrete kind");
 
         assert_eq!(left.entities[0].entity.kind, "method");
+    }
+
+    #[test]
+    fn merge_updates_the_matching_entity_among_neighbors() {
+        let snapshot = SnapshotId::new(WorldId::new("world"), SnapshotVersion::new("v1"));
+        let mut left = ObservationBatch::empty(snapshot.clone());
+        let mut first = observed("syntax.complexity", 1.0);
+        first.entity.id = EntityId::new("first");
+        let mut second = observed("syntax.complexity", 2.0);
+        second.entity.id = EntityId::new("second");
+        left.entities.extend([first, second]);
+        let mut right = ObservationBatch::empty(snapshot);
+        let mut enrichment = observed("graph.incoming", 4.0);
+        enrichment.entity.id = EntityId::new("second");
+        right.entities.push(enrichment);
+
+        left.merge(right).expect("merge neighbor");
+
+        assert_eq!(left.entities.len(), 2);
+        assert_eq!(left.entities[0].measurements.len(), 1);
+        assert_eq!(left.entities[1].measurements.len(), 2);
+        assert_eq!(left.entities[1].measurements[1].name, "graph.incoming");
     }
 }

@@ -17,8 +17,9 @@ use detamu_core::{
 };
 use detamu_language_lsp::{LspError, LspServerConfig, LspSession};
 use detamu_model::{
-    AnalysisInput, AnalyzerCapability, AnalyzerDescriptor, AnalyzerError, AnalyzerExecution,
-    ArtifactContent, ArtifactReader, ModelAnalyzer,
+    ARTIFACT_READ_BUDGET_BYTES, AnalysisInput, AnalyzerCapability, AnalyzerDescriptor,
+    AnalyzerError, AnalyzerExecution, ArtifactContent, ArtifactReader, ModelAnalyzer,
+    artifact_read_groups,
 };
 use detamu_model_code::{
     CODE_MODEL_ID, DependencyType, GitOid, RepositoryId, RevisionId, SymbolId, acc_symbol_id,
@@ -71,9 +72,8 @@ impl RustAnalyzer {
     async fn analyze_workspace(
         &self,
         input: &AnalysisInput,
-        contents: Vec<ArtifactContent>,
+        workspace: &ImmutableWorkspace,
     ) -> Result<ObservationBatch, AnalyzerError> {
-        let workspace = ImmutableWorkspace::create(contents).await?;
         let root_uri = Url::from_directory_path(workspace.root())
             .map_err(|()| AnalyzerError::Failed("encode rust-analyzer root URI".to_owned()))?;
         let mut config = LspServerConfig::new(&self.executable);
@@ -123,12 +123,16 @@ impl ModelAnalyzer for RustAnalyzer {
             .artifacts(source)
             .await
             .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
-        let contents = self
-            .artifacts
-            .read_many(source, &artifacts)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
-        self.analyze_workspace(input, contents).await
+        let workspace = ImmutableWorkspace::create().await?;
+        for group in artifact_read_groups(&artifacts, ARTIFACT_READ_BUDGET_BYTES) {
+            let contents = self
+                .artifacts
+                .read_many(source, &artifacts[group])
+                .await
+                .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
+            workspace.write_contents(contents).await?;
+        }
+        self.analyze_workspace(input, &workspace).await
     }
 }
 
@@ -491,7 +495,7 @@ struct ImmutableWorkspace {
 }
 
 impl ImmutableWorkspace {
-    async fn create(contents: Vec<ArtifactContent>) -> Result<Self, AnalyzerError> {
+    async fn create() -> Result<Self, AnalyzerError> {
         let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
             "detamu-rust-analyzer-{}-{sequence}",
@@ -500,9 +504,13 @@ impl ImmutableWorkspace {
         tokio::fs::create_dir_all(&root).await.map_err(|error| {
             AnalyzerError::Failed(format!("create semantic workspace: {error}"))
         })?;
+        Ok(Self { root })
+    }
+
+    async fn write_contents(&self, contents: Vec<ArtifactContent>) -> Result<(), AnalyzerError> {
         for content in contents {
             let relative = safe_relative_path(&content.artifact.path)?;
-            let target = root.join(relative);
+            let target = self.root.join(relative);
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent).await.map_err(|error| {
                     AnalyzerError::Failed(format!("create artifact directory: {error}"))
@@ -512,7 +520,7 @@ impl ImmutableWorkspace {
                 .await
                 .map_err(|error| AnalyzerError::Failed(format!("write artifact: {error}")))?;
         }
-        Ok(Self { root })
+        Ok(())
     }
 
     fn root(&self) -> &Path {

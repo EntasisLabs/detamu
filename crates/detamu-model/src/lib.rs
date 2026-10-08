@@ -58,12 +58,52 @@ pub trait WorldSource: Send + Sync {
     async fn resolve(&self, request: &SourceRequest) -> Result<SourceResolution, SourceError>;
 }
 
+/// Soft cap for one artifact read so callers can bound source bytes in memory.
+pub const ARTIFACT_READ_BUDGET_BYTES: u64 = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Artifact {
     pub path: String,
     pub content_id: String,
     pub media_type: Option<String>,
     pub attributes: Attributes,
+}
+
+impl Artifact {
+    /// Byte size recorded by the source inventory, when it provided one.
+    #[must_use]
+    pub fn declared_size(&self) -> Option<u64> {
+        self.attributes
+            .get("file.size_bytes")
+            .and_then(serde_json::Value::as_u64)
+    }
+}
+
+/// Splits artifacts into groups that stay near `budget` bytes.
+///
+/// An artifact with no declared size, or one larger than the budget, occupies
+/// a group by itself so a missing size cannot pull an unbounded amount of
+/// source into memory.
+#[must_use]
+pub fn artifact_read_groups(artifacts: &[Artifact], budget: u64) -> Vec<std::ops::Range<usize>> {
+    let budget = budget.max(1);
+    let mut groups = Vec::new();
+    let mut start = 0;
+    while start < artifacts.len() {
+        let mut end = start + 1;
+        let mut bytes = artifacts[start].declared_size().unwrap_or(budget);
+        while end < artifacts.len() && bytes < budget {
+            let next = artifacts[end].declared_size().unwrap_or(budget);
+            if bytes.saturating_add(next) > budget {
+                break;
+            }
+            bytes = bytes.saturating_add(next);
+            end += 1;
+        }
+        groups.push(start..end);
+        start = end;
+    }
+    groups
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -222,4 +262,51 @@ pub trait WorldModelPack: Send + Sync {
     fn derivers(&self) -> Vec<Arc<dyn ObservationDeriver>>;
 
     fn scoring_models(&self) -> Vec<Arc<dyn ScoringModel>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn artifact(path: &str, size: Option<u64>) -> Artifact {
+        let mut attributes = Attributes::new();
+        if let Some(size) = size {
+            attributes.insert("file.size_bytes".to_owned(), serde_json::json!(size));
+        }
+        Artifact {
+            path: path.to_owned(),
+            content_id: path.to_owned(),
+            media_type: None,
+            attributes,
+        }
+    }
+
+    #[test]
+    fn artifact_groups_keep_each_read_near_the_budget() {
+        let artifacts = vec![
+            artifact("a.rs", Some(2)),
+            artifact("b.rs", Some(2)),
+            artifact("huge.rs", Some(100)),
+            artifact("unknown", None),
+            artifact("c.rs", Some(1)),
+        ];
+        let groups = artifact_read_groups(&artifacts, 5)
+            .into_iter()
+            .map(|range| {
+                artifacts[range]
+                    .iter()
+                    .map(|artifact| artifact.path.as_str())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            groups,
+            vec![
+                vec!["a.rs", "b.rs"],
+                vec!["huge.rs"],
+                vec!["unknown"],
+                vec!["c.rs"]
+            ]
+        );
+    }
 }

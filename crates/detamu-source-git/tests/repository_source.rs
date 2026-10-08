@@ -192,7 +192,7 @@ async fn source_and_analyzer_produce_a_partial_code_snapshot() {
             .iter()
             .any(|measurement| measurement.name == "git.total_commits")
     }));
-    assert!(batch.relations.is_empty());
+    assert_eq!(batch.relations, []);
 }
 
 #[tokio::test]
