@@ -138,6 +138,12 @@ expressions. It is deterministic but not yet claimed to be byte-for-byte Lizard
 parity. Missing graph and coverage evidence remains absent, so AVEC scoring skips
 those entities until the required measurements exist.
 
+AVEC formula version 1 matches ACC's documented weights. Coverage is stored as a
+0–1 ratio, which is the same input as ACC's 0–100 percentages after dividing by
+100. Autonomy uses 80% dependency ratio and 20% absolute outgoing load. The
+shipped C# calculator applies the 0.8 ratio weight to both terms; Detamu follows
+the weights and the comment beside that code instead.
+
 ## Layered language analysis
 
 Detamu does not reimplement every language frontend. Code analysis is layered:
@@ -157,6 +163,13 @@ Detamu does not reimplement every language frontend. Code analysis is layered:
   isolated temporary workspace, disables build scripts and procedural macros,
   and translates document symbols, references, and call hierarchy responses into
   ACC-compatible relation endpoints. It never analyzes the mutable worktree.
+- Registered language servers use the same host. `detamu lsp register` stores a
+  stdio command, language id, and file extensions beside the database.
+  `detamu index` launches each one against the committed tree and normalizes
+  document symbols, references, calls, and C# base lists into the code model.
+  Edge weights follow ACC: inherits and implements 1.0, calls 0.7, imports 0.5,
+  references 0.3, and any other dependency kind 0.5. Graph degrees are recorded
+  only for languages a semantic server actually covered.
 
 All layers emit the same normalized code model. Lizard has lower metric confidence
 than the in-process Rust syntax specification, so both values remain inspectable

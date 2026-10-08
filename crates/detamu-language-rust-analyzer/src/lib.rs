@@ -149,7 +149,7 @@ async fn observe_semantics(
         observer: "lsp.rust-analyzer".to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         configuration_digest: Some("references-calls-v1".to_owned()),
-        source: None,
+        source: Some("rust".to_owned()),
     });
     let mut catalog = Vec::new();
     for (index, path) in rust_files.iter().enumerate() {
@@ -197,7 +197,6 @@ async fn observe_semantics(
             &SymbolId::new(from),
             &SymbolId::new(to),
             &kind,
-            1.0,
         ));
     }
     Ok(batch)

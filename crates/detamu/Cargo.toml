@@ -17,8 +17,9 @@ default = ["query", "runtime"]
 query = ["dep:detamu-query"]
 runtime = ["dep:detamu-runtime"]
 code = ["query", "dep:detamu-model-code", "dep:detamu-query-code"]
+rpc = ["code", "dep:detamu-rpc"]
 surreal = ["dep:detamu-surreal"]
-full = ["code", "query", "runtime", "surreal"]
+full = ["code", "query", "runtime", "surreal", "rpc"]
 
 [dependencies]
 detamu-core.workspace = true
@@ -26,6 +27,7 @@ detamu-model.workspace = true
 detamu-model-code = { workspace = true, optional = true }
 detamu-query = { workspace = true, optional = true }
 detamu-query-code = { workspace = true, optional = true }
+detamu-rpc = { workspace = true, optional = true }
 detamu-runtime = { workspace = true, optional = true }
 detamu-sdk.workspace = true
 detamu-store.workspace = true

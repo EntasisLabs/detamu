@@ -21,5 +21,8 @@ pub use detamu_model_code as code;
 #[cfg(feature = "code")]
 pub use detamu_query_code as code_query;
 
+#[cfg(feature = "rpc")]
+pub use detamu_rpc as rpc;
+
 #[cfg(feature = "surreal")]
 pub use detamu_surreal as surreal;

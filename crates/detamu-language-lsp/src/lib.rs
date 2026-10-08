@@ -1,5 +1,11 @@
 //! Generic Language Server Protocol process lifecycle for Detamu adapters.
 
+mod registered;
+mod registry;
+
+pub use registered::{LspRegistration, RegisteredLsp};
+pub use registry::LspRegistry;
+
 use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 
 use async_trait::async_trait;

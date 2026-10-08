@@ -1,9 +1,13 @@
 use std::{collections::BTreeMap, process::ExitCode, sync::Arc};
 
 use detamu_core::{EntityId, SnapshotId, SnapshotVersion, WorldId};
+use detamu_model_code::AvecScores;
 use detamu_query::{QUERY_SCHEMA_VERSION, SnapshotQuery};
-use detamu_query_code::{CodeEntityFilter, CodeQuery};
-use detamu_store::DetamuStore;
+use detamu_query_code::{
+    CodeEntityFilter, CodeQuery, FRICTION_MINIMUM, PATTERN_LIMIT, PATTERN_THRESHOLD, RANK_LIMIT,
+    UNSTABLE_MAXIMUM,
+};
+use detamu_store::{DetamuStore, RelationDirection};
 use detamu_surreal::SurrealStore;
 use serde_json::{Value, json};
 
@@ -19,6 +23,11 @@ pub async fn run(command: &str, arguments: impl Iterator<Item = String>) -> Exit
         "impact" => impact(parsed).await,
         "diff" => diff(parsed).await,
         "gaps" => gaps(parsed).await,
+        "dependencies" => dependencies(parsed).await,
+        "patterns" => patterns(parsed).await,
+        "friction" => friction(parsed).await,
+        "unstable" => unstable(parsed).await,
+        "stats" => stats(parsed).await,
         _ => unreachable!("query command is validated by main"),
     };
     match result {
@@ -141,6 +150,137 @@ async fn diff(arguments: Arguments) -> Result<Value, String> {
         .await
         .map_err(|error| error.to_string())?;
     serde_json::to_value(diff).map_err(|error| error.to_string())
+}
+
+async fn dependencies(arguments: Arguments) -> Result<Value, String> {
+    arguments.require_positionals(4, dependencies_usage)?;
+    arguments.allow_options(
+        &["direction", "depth", "max-nodes", "namespace", "database"],
+        dependencies_usage,
+    )?;
+    let connection = arguments.connection()?;
+    let snapshot = arguments.snapshot(1, 2);
+    let direction = match arguments
+        .option("direction")?
+        .unwrap_or("both")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "incoming" => RelationDirection::Incoming,
+        "outgoing" => RelationDirection::Outgoing,
+        "both" => RelationDirection::Both,
+        other => {
+            return Err(format!(
+                "direction must be incoming, outgoing, or both, not {other}"
+            ));
+        }
+    };
+    let query = CodeQuery::new(open_store(&arguments.positionals[0], &connection).await?);
+    let dependencies = query
+        .dependencies(
+            &snapshot,
+            &EntityId::new(&arguments.positionals[3]),
+            direction,
+            arguments.parse_option("depth")?.unwrap_or(u32::MAX),
+            arguments.parse_option("max-nodes")?.unwrap_or(10_000),
+            true,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(dependencies).map_err(|error| error.to_string())
+}
+
+async fn patterns(arguments: Arguments) -> Result<Value, String> {
+    arguments.require_positionals(3, patterns_usage)?;
+    arguments.allow_options(
+        &[
+            "stability",
+            "logic",
+            "friction",
+            "autonomy",
+            "threshold",
+            "limit",
+            "namespace",
+            "database",
+        ],
+        patterns_usage,
+    )?;
+    let connection = arguments.connection()?;
+    let snapshot = arguments.snapshot(1, 2);
+    let profile = AvecScores {
+        stability: arguments
+            .parse_option("stability")?
+            .ok_or_else(|| patterns_usage().to_owned())?,
+        logic: arguments
+            .parse_option("logic")?
+            .ok_or_else(|| patterns_usage().to_owned())?,
+        friction: arguments
+            .parse_option("friction")?
+            .ok_or_else(|| patterns_usage().to_owned())?,
+        autonomy: arguments
+            .parse_option("autonomy")?
+            .ok_or_else(|| patterns_usage().to_owned())?,
+    };
+    let query = CodeQuery::new(open_store(&arguments.positionals[0], &connection).await?);
+    let matches = query
+        .patterns(
+            &snapshot,
+            profile,
+            arguments
+                .parse_option("threshold")?
+                .unwrap_or(PATTERN_THRESHOLD),
+            arguments.parse_option("limit")?.unwrap_or(PATTERN_LIMIT),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(matches).map_err(|error| error.to_string())
+}
+
+async fn friction(arguments: Arguments) -> Result<Value, String> {
+    arguments.require_positionals(3, friction_usage)?;
+    arguments.allow_options(&["min", "limit", "namespace", "database"], friction_usage)?;
+    let connection = arguments.connection()?;
+    let snapshot = arguments.snapshot(1, 2);
+    let query = CodeQuery::new(open_store(&arguments.positionals[0], &connection).await?);
+    let nodes = query
+        .high_friction(
+            &snapshot,
+            arguments.parse_option("min")?.unwrap_or(FRICTION_MINIMUM),
+            arguments.parse_option("limit")?.unwrap_or(RANK_LIMIT),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(nodes).map_err(|error| error.to_string())
+}
+
+async fn unstable(arguments: Arguments) -> Result<Value, String> {
+    arguments.require_positionals(3, unstable_usage)?;
+    arguments.allow_options(&["max", "limit", "namespace", "database"], unstable_usage)?;
+    let connection = arguments.connection()?;
+    let snapshot = arguments.snapshot(1, 2);
+    let query = CodeQuery::new(open_store(&arguments.positionals[0], &connection).await?);
+    let nodes = query
+        .unstable(
+            &snapshot,
+            arguments.parse_option("max")?.unwrap_or(UNSTABLE_MAXIMUM),
+            arguments.parse_option("limit")?.unwrap_or(RANK_LIMIT),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(nodes).map_err(|error| error.to_string())
+}
+
+async fn stats(arguments: Arguments) -> Result<Value, String> {
+    arguments.require_positionals(3, stats_usage)?;
+    arguments.allow_options(&["namespace", "database"], stats_usage)?;
+    let connection = arguments.connection()?;
+    let snapshot = arguments.snapshot(1, 2);
+    let query = CodeQuery::new(open_store(&arguments.positionals[0], &connection).await?);
+    let stats = query
+        .stats(&snapshot)
+        .await
+        .map_err(|error| error.to_string())?;
+    serde_json::to_value(stats).map_err(|error| error.to_string())
 }
 
 async fn gaps(arguments: Arguments) -> Result<Value, String> {
@@ -313,6 +453,26 @@ fn diff_usage() -> &'static str {
 
 fn gaps_usage() -> &'static str {
     "usage: detamu gaps <DATABASE_PATH> <WORLD> <SNAPSHOT> [--namespace <NS>] [--database <DB>]"
+}
+
+fn dependencies_usage() -> &'static str {
+    "usage: detamu dependencies <DATABASE_PATH> <WORLD> <SNAPSHOT> <ENTITY_ID> [--direction incoming|outgoing|both] [--depth <DEPTH>] [--max-nodes <COUNT>]"
+}
+
+fn patterns_usage() -> &'static str {
+    "usage: detamu patterns <DATABASE_PATH> <WORLD> <SNAPSHOT> --stability <N> --logic <N> --friction <N> --autonomy <N> [--threshold <N>] [--limit <COUNT>]"
+}
+
+fn friction_usage() -> &'static str {
+    "usage: detamu friction <DATABASE_PATH> <WORLD> <SNAPSHOT> [--min <SCORE>] [--limit <COUNT>]"
+}
+
+fn unstable_usage() -> &'static str {
+    "usage: detamu unstable <DATABASE_PATH> <WORLD> <SNAPSHOT> [--max <SCORE>] [--limit <COUNT>]"
+}
+
+fn stats_usage() -> &'static str {
+    "usage: detamu stats <DATABASE_PATH> <WORLD> <SNAPSHOT> [--namespace <NS>] [--database <DB>]"
 }
 
 #[cfg(test)]

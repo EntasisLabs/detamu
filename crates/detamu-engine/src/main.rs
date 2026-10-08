@@ -3,6 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 use detamu_code_coverage::CodeCoverageDeriver;
 use detamu_language::LanguagePack;
 use detamu_language_lizard::LizardAnalyzer;
+use detamu_language_lsp::{LspRegistry, RegisteredLsp};
 use detamu_language_rust::RustLanguagePack;
 use detamu_language_rust_analyzer::RustAnalyzer;
 use detamu_model::{ArtifactReader, SourceRequest};
@@ -21,30 +22,7 @@ async fn main() -> ExitCode {
             println!("detamu {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Some("doctor") => {
-            let inventory = runtime_inventory().await;
-            let lizard = runtime_available(&inventory, "lizard");
-            let rust_analyzer = runtime_available(&inventory, "rust-analyzer");
-            let report = serde_json::json!({
-                "name": "detamu",
-                "version": env!("CARGO_PKG_VERSION"),
-                "sdk": "available",
-                "store": "in-memory",
-                "surreal": "surrealkv",
-                "world_models": ["code"],
-                "language_packs": ["rust"],
-                "coverage_formats": ["lcov", "cobertura"],
-                "analysis_engines": {
-                    "tree_sitter": true,
-                    "lizard": lizard,
-                    "lsp_host": true,
-                    "rust_analyzer": rust_analyzer,
-                },
-                "runtime_contract": inventory,
-            });
-            println!("{report}");
-            ExitCode::SUCCESS
-        }
+        Some("doctor") => doctor().await,
         Some("runtimes") => {
             let inventory = runtime_inventory().await;
             match serde_json::to_string(&inventory) {
@@ -98,8 +76,14 @@ async fn main() -> ExitCode {
             };
             index_repository(&repository, &path, &options).await
         }
-        Some(command @ ("snapshots" | "inspect" | "find" | "impact" | "diff" | "gaps")) => {
-            query_commands::run(command, arguments).await
+        Some(
+            command @ ("snapshots" | "inspect" | "find" | "impact" | "diff" | "gaps"
+            | "dependencies" | "patterns" | "friction" | "unstable" | "stats"),
+        ) => query_commands::run(command, arguments).await,
+        Some("serve") => serve_command(arguments).await,
+        Some("lsp") => {
+            let subcommand = arguments.next();
+            lsp_commands::run(subcommand.as_deref(), arguments)
         }
         Some("help" | "--help" | "-h") | None => {
             print_help();
@@ -111,6 +95,32 @@ async fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+async fn doctor() -> ExitCode {
+    let inventory = runtime_inventory().await;
+    let lizard = runtime_available(&inventory, "lizard");
+    let rust_analyzer = runtime_available(&inventory, "rust-analyzer");
+    let report = serde_json::json!({
+        "name": "detamu",
+        "version": env!("CARGO_PKG_VERSION"),
+        "sdk": "available",
+        "store": "in-memory",
+        "surreal": "surrealkv",
+        "world_models": ["code"],
+        "language_packs": ["rust"],
+        "coverage_formats": ["lcov", "cobertura"],
+        "analysis_engines": {
+            "tree_sitter": true,
+            "lizard": lizard,
+            "lsp_host": true,
+            "rust_analyzer": rust_analyzer,
+            "json_rpc": true,
+        },
+        "runtime_contract": inventory,
+    });
+    println!("{report}");
+    ExitCode::SUCCESS
 }
 
 fn print_help() {
@@ -127,6 +137,13 @@ fn print_help() {
            impact    Traverse reverse code dependencies\n  \
            diff      Compare two snapshots of the same world\n  \
            gaps      Explain missing AVEC evidence and scores\n  \
+           dependencies  Traverse dependency edges in either direction\n  \
+           patterns  Find symbols with a similar AVEC profile\n  \
+           friction  List high-friction symbols\n  \
+           unstable  List low-stability symbols\n  \
+           stats     Summarize AVEC scores for one snapshot\n  \
+           lsp       Register, remove, or list language servers used by index\n  \
+           serve     Serve JSON-RPC queries and language-server registration\n  \
            runtimes  Report optional analyzer package requirements and resolution\n  \
            version   Print the engine version\n  \
            help      Print this help"
@@ -165,9 +182,24 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
             lizard_runtime.executable,
         )))
         .analyzer(Arc::new(
-            RustAnalyzer::new(source).with_executable(rust_analyzer_runtime.executable),
-        ))
-        .deriver(Arc::new(GraphMetricsDeriver));
+            RustAnalyzer::new(Arc::clone(&source))
+                .with_executable(rust_analyzer_runtime.executable),
+        ));
+    let registrations = match LspRegistry::load(std::path::Path::new(path)) {
+        Ok(registry) => registry.registrations().to_vec(),
+        Err(error) => {
+            eprintln!("failed to load language server registry: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let language_servers = registrations.len();
+    for registration in registrations {
+        builder = builder.analyzer(Arc::new(RegisteredLsp::new(
+            Arc::clone(&source),
+            registration,
+        )));
+    }
+    builder = builder.deriver(Arc::new(GraphMetricsDeriver));
     if let Some(coverage) = coverage {
         builder = builder.deriver(coverage);
     }
@@ -188,6 +220,7 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
                 "analyzers_run": report.analyzers_run,
                 "analyzers_skipped": report.analyzers_skipped,
                 "derivers_run": report.derivers_run,
+                "language_servers": language_servers,
                 "coverage_reports": options.coverage.len(),
                 "coverage": format!("{:?}", report.coverage).to_ascii_lowercase(),
             });
@@ -306,4 +339,82 @@ mod tests {
         assert!(error.starts_with("usage: detamu index"));
     }
 }
+async fn serve_command(arguments: impl Iterator<Item = String>) -> ExitCode {
+    let mut positionals = Vec::new();
+    let mut port = 9339_u16;
+    let mut bind = "127.0.0.1".to_owned();
+    let mut namespace = "detamu".to_owned();
+    let mut database = "detamu".to_owned();
+    let mut arguments = arguments;
+    while let Some(argument) = arguments.next() {
+        let mut next = |name: &str| {
+            arguments
+                .next()
+                .ok_or_else(|| format!("--{name} requires a value"))
+        };
+        match argument.as_str() {
+            "--port" => {
+                port = match next("port").and_then(|value| {
+                    value
+                        .parse()
+                        .map_err(|error| format!("invalid --port: {error}"))
+                }) {
+                    Ok(port) => port,
+                    Err(error) => {
+                        eprintln!("{error}");
+                        return ExitCode::from(2);
+                    }
+                };
+            }
+            "--bind" => match next("bind") {
+                Ok(value) => bind = value,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::from(2);
+                }
+            },
+            "--namespace" => match next("namespace") {
+                Ok(value) => namespace = value,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::from(2);
+                }
+            },
+            "--database" => match next("database") {
+                Ok(value) => database = value,
+                Err(error) => {
+                    eprintln!("{error}");
+                    return ExitCode::from(2);
+                }
+            },
+            other if other.starts_with('-') => {
+                eprintln!("unknown option {other}\n{}", serve_usage());
+                return ExitCode::from(2);
+            }
+            other => positionals.push(other.to_owned()),
+        }
+    }
+    let Some(path) = positionals.first() else {
+        eprintln!("{}", serve_usage());
+        return ExitCode::from(2);
+    };
+    if positionals.len() != 1 {
+        eprintln!("{}", serve_usage());
+        return ExitCode::from(2);
+    }
+    match rpc::serve(path, &namespace, &database, &bind, port).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn serve_usage() -> &'static str {
+    "usage: detamu serve <DATABASE_PATH> [--bind <ADDRESS>] [--port <PORT>] [--namespace <NS>] [--database <DB>]"
+}
+
+mod lsp_commands;
 mod query_commands;
+mod rpc;

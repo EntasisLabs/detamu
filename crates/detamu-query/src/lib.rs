@@ -24,6 +24,8 @@ pub enum QueryError {
     DifferentWorlds,
     #[error("graph traversal max_nodes must be greater than zero")]
     InvalidNodeLimit,
+    #[error("{0}")]
+    InvalidRequest(String),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -96,6 +98,10 @@ pub struct SnapshotQuery {
 impl SnapshotQuery {
     pub fn new(store: Arc<dyn DetamuStore>) -> Self {
         Self { store }
+    }
+
+    pub fn store(&self) -> &Arc<dyn DetamuStore> {
+        &self.store
     }
 
     /// Returns metadata for one immutable snapshot.

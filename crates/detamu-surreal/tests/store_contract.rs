@@ -53,7 +53,6 @@ fn fixture() -> ObservationBatch {
         &source,
         &target,
         &DependencyType::Calls,
-        0.7,
     )];
     AvecCodeScorer::default()
         .score(&mut batch)

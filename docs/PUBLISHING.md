@@ -107,6 +107,7 @@ detamu-language-lizard
 detamu-language-rust
 detamu-language-rust-analyzer
 detamu-query-code
+detamu-rpc
 detamu
 detamu-engine
 ```

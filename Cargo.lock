@@ -806,6 +806,7 @@ dependencies = [
  "detamu-model-code",
  "detamu-query",
  "detamu-query-code",
+ "detamu-rpc",
  "detamu-runtime",
  "detamu-sdk",
  "detamu-store",
@@ -840,17 +841,20 @@ dependencies = [
  "detamu-core",
  "detamu-language",
  "detamu-language-lizard",
+ "detamu-language-lsp",
  "detamu-language-rust",
  "detamu-language-rust-analyzer",
  "detamu-model",
  "detamu-model-code",
  "detamu-query",
  "detamu-query-code",
+ "detamu-rpc",
  "detamu-runtime",
  "detamu-sdk",
  "detamu-source-git",
  "detamu-store",
  "detamu-surreal",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -897,9 +901,12 @@ dependencies = [
  "async-trait",
  "detamu-core",
  "detamu-model",
+ "detamu-model-code",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "url",
 ]
 
 [[package]]
@@ -988,6 +995,22 @@ dependencies = [
  "detamu-query",
  "detamu-store",
  "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "detamu-rpc"
+version = "0.1.1"
+dependencies = [
+ "async-trait",
+ "detamu-core",
+ "detamu-language-lsp",
+ "detamu-model-code",
+ "detamu-query",
+ "detamu-query-code",
+ "detamu-sdk",
+ "detamu-store",
  "serde_json",
  "tokio",
 ]
