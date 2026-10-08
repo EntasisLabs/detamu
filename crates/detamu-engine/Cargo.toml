@@ -1,6 +1,6 @@
 [package]
 name = "detamu-engine"
-description = "Standalone Detamu engine"
+description = "Standalone Detamu CLI and JSON-RPC host (the detamu binary)"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

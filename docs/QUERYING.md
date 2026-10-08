@@ -3,7 +3,8 @@
 Detamu exposes the same persisted world through two consumption surfaces:
 
 - `detamu-query` and `detamu-query-code` for embedded Rust clients;
-- JSON commands from `detamu-engine` for Medousa and non-Rust clients.
+- JSON commands from the `detamu` binary (crate `detamu-engine`) for Medousa
+  and non-Rust clients.
 
 The generic query layer knows snapshots, entities, relations, traversal, and
 comparison. Code meaning remains in the code facade.
@@ -15,8 +16,8 @@ Every query addresses an immutable `WorldId` and source version. Indexing withou
 commit-ish:
 
 ```bash
-detamu-engine index . ./data/detamu.surrealkv --revision d0cfd57
-detamu-engine index . ./data/detamu.surrealkv --revision 51d3ada
+detamu index . ./data/detamu.surrealkv --revision d0cfd57
+detamu index . ./data/detamu.surrealkv --revision 51d3ada
 ```
 
 Both commits coexist as snapshots. Re-indexing the same identity atomically
@@ -40,19 +41,19 @@ Failures write a stable error envelope to stderr and exit nonzero:
 model and scoring versions.
 
 ```text
-detamu-engine snapshots DB [--world WORLD]
-detamu-engine inspect DB WORLD SNAPSHOT ENTITY
-detamu-engine find DB WORLD SNAPSHOT [--path PATH] [--line LINE]
+detamu snapshots DB [--world WORLD]
+detamu inspect DB WORLD SNAPSHOT ENTITY
+detamu find DB WORLD SNAPSHOT [--path PATH] [--line LINE]
     [--name NAME] [--kind KIND] [--language LANGUAGE] [--limit N]
-detamu-engine impact DB WORLD SNAPSHOT ENTITY [--depth N] [--max-nodes N]
-detamu-engine diff DB WORLD FROM_SNAPSHOT TO_SNAPSHOT
-detamu-engine gaps DB WORLD SNAPSHOT
-detamu-engine dependencies DB WORLD SNAPSHOT ENTITY [--direction both] [--depth N]
-detamu-engine patterns DB WORLD SNAPSHOT --stability N --logic N --friction N --autonomy N
+detamu impact DB WORLD SNAPSHOT ENTITY [--depth N] [--max-nodes N]
+detamu diff DB WORLD FROM_SNAPSHOT TO_SNAPSHOT
+detamu gaps DB WORLD SNAPSHOT
+detamu dependencies DB WORLD SNAPSHOT ENTITY [--direction both] [--depth N]
+detamu patterns DB WORLD SNAPSHOT --stability N --logic N --friction N --autonomy N
     [--threshold 0.8] [--limit 50]
-detamu-engine friction DB WORLD SNAPSHOT [--min 0.7] [--limit 20]
-detamu-engine unstable DB WORLD SNAPSHOT [--max 0.4] [--limit 20]
-detamu-engine stats DB WORLD SNAPSHOT
+detamu friction DB WORLD SNAPSHOT [--min 0.7] [--limit 20]
+detamu unstable DB WORLD SNAPSHOT [--max 0.4] [--limit 20]
+detamu stats DB WORLD SNAPSHOT
 ```
 
 All commands also accept `--namespace` and `--database`; both default to

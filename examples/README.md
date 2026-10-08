@@ -9,8 +9,8 @@ Runnable examples for embedding Detamu. Each example is a workspace member so
 
 These examples intentionally use the minimal analyzer set (Git inventory +
 Tree-sitter Rust + AVEC scoring). Compare with `crates/detamu-engine` for the
-full CLI stack including optional Lizard, rust-analyzer, coverage ingestion, and
-SurrealKV persistence.
+full CLI stack including optional Lizard, rust-analyzer, registered language
+servers, coverage ingestion, JSON-RPC, and SurrealKV persistence.
 
 See [Getting started](../docs/GETTING_STARTED.md) for install instructions and
 the CLI workflow.

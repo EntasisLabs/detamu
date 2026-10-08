@@ -25,11 +25,54 @@ CRATES=(
   detamu-language-rust
   detamu-language-rust-analyzer
   detamu-query-code
+  detamu-rpc
   detamu
   detamu-engine
 )
 
+# Every publishable workspace member must appear above, in dependency order.
+# examples/index-and-query stays publish = false and is intentionally omitted.
+verify_publish_list() {
+  local missing=0
+  local member manifest name crate listed
+  while IFS= read -r member; do
+    manifest="${member}/Cargo.toml"
+    if [[ ! -f "$manifest" ]]; then
+      echo "workspace member ${member} has no Cargo.toml" >&2
+      missing=1
+      continue
+    fi
+    if grep -q '^publish = false$' "$manifest"; then
+      continue
+    fi
+    name="$(sed -n 's/^name = "\([^"]*\)"/\1/p' "$manifest" | head -n 1)"
+    listed=0
+    for crate in "${CRATES[@]}"; do
+      if [[ "$crate" == "$name" ]]; then
+        listed=1
+        break
+      fi
+    done
+    if [[ "$listed" -eq 0 ]]; then
+      echo "publish list is missing ${name} (${manifest})" >&2
+      missing=1
+    fi
+  done < <(sed -n '/^members = \[/,/^\]/p' Cargo.toml | sed -n 's/^[[:space:]]*"\([^"]*\)".*/\1/p')
+
+  for crate in "${CRATES[@]}"; do
+    if ! grep -R -q --include=Cargo.toml "^name = \"${crate}\"$" crates; then
+      echo "publish list names ${crate}, which is not a crate in crates/" >&2
+      missing=1
+    fi
+  done
+
+  if [[ "$missing" -ne 0 ]]; then
+    return 1
+  fi
+}
+
 check_workspace() {
+  verify_publish_list
   cargo fmt --all --check
   cargo clippy --workspace --all-targets --all-features -- -D warnings
   cargo test --workspace --all-features

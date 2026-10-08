@@ -722,6 +722,9 @@ mod tests {
     #[tokio::test]
     async fn live_rust_analyzer_emits_call_edges_when_configured() {
         if std::env::var_os("DETAMU_RUST_ANALYZER").is_none() {
+            eprintln!(
+                "skipping live rust-analyzer test; set DETAMU_RUST_ANALYZER to the rust-analyzer executable to run it"
+            );
             return;
         }
         let analyzer = RustAnalyzer::from_environment(Arc::new(FixtureReader));
