@@ -8,6 +8,7 @@ mod avec;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Write as _,
+    sync::OnceLock,
 };
 
 use detamu_core::{
@@ -30,17 +31,35 @@ pub use avec::{
 
 macro_rules! string_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-        #[serde(transparent)]
-        pub struct $name(String);
+        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+        pub struct $name(std::sync::Arc<str>);
 
         impl $name {
             pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
+                Self(std::sync::Arc::from(value.into()))
             }
 
             pub fn as_str(&self) -> &str {
                 &self.0
+            }
+        }
+
+        impl Serialize for $name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = String::deserialize(deserializer)?;
+                Ok(Self::new(value))
             }
         }
 
@@ -80,7 +99,7 @@ pub struct CodeModelPack {
 impl WorldModelPack for CodeModelPack {
     fn descriptor(&self) -> ModelDescriptor {
         ModelDescriptor {
-            id: ModelId::new(CODE_MODEL_ID),
+            id: code_model(),
             version: 1,
             entity_kinds: [
                 "module",
@@ -133,7 +152,7 @@ impl ObservationDeriver for GraphMetricsDeriver {
         DeriverDescriptor {
             name: "code.graph.metrics".to_owned(),
             version: "1".to_owned(),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             capabilities: vec![AnalyzerCapability::Metrics],
         }
     }
@@ -146,7 +165,7 @@ impl ObservationDeriver for GraphMetricsDeriver {
         {
             return Ok(());
         }
-        let mut degrees = HashMap::<EntityId, (u32, u32)>::new();
+        let mut degrees = HashMap::<EntityId, (u32, u32)>::with_capacity(batch.relations.len());
         for observation in &batch.relations {
             if observation.relation.kind == "contains" {
                 continue;
@@ -215,11 +234,43 @@ impl RevisionId {
     }
 
     pub fn snapshot(&self) -> SnapshotId {
-        SnapshotId::new(
-            WorldId::new(format!("code.repository:{}", self.repository.as_str())),
-            SnapshotVersion::new(self.commit.as_str()),
-        )
+        cached_snapshot(&self.repository, &self.commit)
     }
+}
+
+fn cached_snapshot(repository: &RepositoryId, commit: &GitOid) -> SnapshotId {
+    // Every observation used to allocate its own copy of the repository world
+    // and commit. Cloning one shared identifier keeps those strings alive once
+    // per revision on this thread.
+    thread_local! {
+        static SNAPSHOTS: std::cell::RefCell<Vec<(RepositoryId, GitOid, SnapshotId)>> =
+            const { std::cell::RefCell::new(Vec::new()) };
+    }
+    const SNAPSHOT_CACHE_LIMIT: usize = 8;
+    SNAPSHOTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((_, _, snapshot)) =
+            cache.iter().find(|(cached_repository, cached_commit, _)| {
+                cached_repository == repository && cached_commit == commit
+            })
+        {
+            return snapshot.clone();
+        }
+        if cache.len() == SNAPSHOT_CACHE_LIMIT {
+            cache.remove(0);
+        }
+        let snapshot = SnapshotId::new(
+            WorldId::new(format!("code.repository:{}", repository.as_str())),
+            SnapshotVersion::new(commit.as_str()),
+        );
+        cache.push((repository.clone(), commit.clone(), snapshot.clone()));
+        snapshot
+    })
+}
+
+fn code_model() -> ModelId {
+    static MODEL: OnceLock<ModelId> = OnceLock::new();
+    MODEL.get_or_init(|| ModelId::new(CODE_MODEL_ID)).clone()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,7 +370,7 @@ pub fn file_observation(
         snapshot: revision.snapshot(),
         entity: Entity {
             id: EntityId::new(format!("file:{path}")),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: NodeKind::File.as_str().to_owned(),
             label: path.to_owned(),
         },
@@ -488,7 +539,7 @@ pub fn syntax_symbol_observation(
         snapshot: revision.snapshot(),
         entity: Entity {
             id: EntityId::new(symbol.id.as_str()),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: symbol.kind.as_str().to_owned(),
             label: symbol.qualified_name,
         },
@@ -509,7 +560,7 @@ pub fn file_contains_symbol(
         snapshot: revision.snapshot(),
         relation: Relation {
             id: RelationId::new(format!("contains:{file_path}:{}", symbol.as_str())),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: "contains".to_owned(),
             from: file,
             to: symbol,
@@ -533,7 +584,7 @@ pub fn imported_module_observation(
         snapshot: revision.snapshot(),
         entity: Entity {
             id,
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: NodeKind::Module.as_str().to_owned(),
             label: import_path.to_owned(),
         },
@@ -555,7 +606,7 @@ pub fn file_imports_module(
         snapshot: revision.snapshot(),
         relation: Relation {
             id: RelationId::new(format!("{}:imports:{}", from.as_str(), to.as_str())),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: DependencyType::Imports.as_str(),
             from,
             to,
@@ -676,7 +727,7 @@ pub fn symbol_observation(
         snapshot: revision.snapshot(),
         entity: Entity {
             id: EntityId::new(symbol.id.as_str()),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind: symbol.kind.as_str().to_owned(),
             label: symbol.qualified_name,
         },
@@ -698,7 +749,7 @@ pub fn dependency_observation(
         snapshot: revision.snapshot(),
         relation: Relation {
             id: RelationId::new(format!("{}:{kind}:{}", from.as_str(), to.as_str())),
-            model: ModelId::new(CODE_MODEL_ID),
+            model: code_model(),
             kind,
             from: EntityId::new(from.as_str()),
             to: EntityId::new(to.as_str()),

@@ -12,8 +12,9 @@ use std::{
 use async_trait::async_trait;
 use detamu_core::{AnalysisCoverage, ModelId, ObservationBatch, ObserverProvenance};
 use detamu_model::{
-    AnalysisInput, AnalyzerCapability, AnalyzerDescriptor, AnalyzerError, AnalyzerExecution,
-    Artifact, ArtifactReader, ModelAnalyzer,
+    ARTIFACT_READ_BUDGET_BYTES, AnalysisInput, AnalyzerCapability, AnalyzerDescriptor,
+    AnalyzerError, AnalyzerExecution, Artifact, ArtifactReader, ModelAnalyzer,
+    artifact_read_groups,
 };
 use detamu_model_code::{
     CODE_MODEL_ID, CodeSymbol, GitOid, LanguageId, NodeKind, RepositoryId, RevisionId,
@@ -81,28 +82,30 @@ impl ModelAnalyzer for LizardAnalyzer {
             .artifacts(source)
             .await
             .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
-        let contents = self
-            .artifacts
-            .read_many(source, &artifacts)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
         let temporary = temporary_directory();
         tokio::fs::create_dir_all(&temporary)
             .await
             .map_err(|error| AnalyzerError::Failed(format!("create Lizard workspace: {error}")))?;
-        for content in contents {
-            let relative = safe_relative_path(&content.artifact.path)?;
-            let target = temporary.join(relative);
-            if let Some(parent) = target.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                    AnalyzerError::Failed(format!("create Lizard artifact directory: {error}"))
-                })?;
-            }
-            tokio::fs::write(&target, content.bytes)
+        for group in artifact_read_groups(&artifacts, ARTIFACT_READ_BUDGET_BYTES) {
+            let contents = self
+                .artifacts
+                .read_many(source, &artifacts[group])
                 .await
-                .map_err(|error| {
-                    AnalyzerError::Failed(format!("materialize Lizard artifact: {error}"))
-                })?;
+                .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
+            for content in contents {
+                let relative = safe_relative_path(&content.artifact.path)?;
+                let target = temporary.join(relative);
+                if let Some(parent) = target.parent() {
+                    tokio::fs::create_dir_all(parent).await.map_err(|error| {
+                        AnalyzerError::Failed(format!("create Lizard artifact directory: {error}"))
+                    })?;
+                }
+                tokio::fs::write(&target, content.bytes)
+                    .await
+                    .map_err(|error| {
+                        AnalyzerError::Failed(format!("materialize Lizard artifact: {error}"))
+                    })?;
+            }
         }
 
         let output = Command::new(&self.executable)

@@ -166,11 +166,18 @@ fn normalized(value: f64) -> bool {
     value.is_finite() && (0.0..=1.0).contains(&value)
 }
 
+#[derive(Debug)]
+struct SnapshotState {
+    record: SnapshotRecord,
+    entities: HashMap<EntityId, EntityObservation>,
+    relations: Vec<RelationObservation>,
+    outgoing: HashMap<EntityId, Vec<usize>>,
+    incoming: HashMap<EntityId, Vec<usize>>,
+}
+
 #[derive(Debug, Default)]
 struct MemoryState {
-    snapshots: HashMap<SnapshotId, SnapshotRecord>,
-    entities: HashMap<(SnapshotId, EntityId), EntityObservation>,
-    relations: Vec<RelationObservation>,
+    snapshots: HashMap<SnapshotId, SnapshotState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -182,23 +189,36 @@ pub struct InMemoryStore {
 impl DetamuStore for InMemoryStore {
     async fn ingest(&self, batch: ObservationBatch) -> Result<(), StoreError> {
         validate_batch(&batch)?;
-
-        let mut state = self.state.write().await;
-        state
-            .snapshots
-            .insert(batch.snapshot.clone(), SnapshotRecord::from(&batch));
-        state
-            .entities
-            .retain(|(snapshot, _), _| snapshot != &batch.snapshot);
+        let record = SnapshotRecord::from(&batch);
+        let mut entities = HashMap::with_capacity(batch.entities.len());
         for observation in batch.entities {
-            let key = (batch.snapshot.clone(), observation.entity.id.clone());
-            state.entities.insert(key, observation);
+            entities.insert(observation.entity.id.clone(), observation);
+        }
+        let relations = batch.relations;
+        let mut outgoing: HashMap<EntityId, Vec<usize>> = HashMap::new();
+        let mut incoming: HashMap<EntityId, Vec<usize>> = HashMap::new();
+        for (index, relation) in relations.iter().enumerate() {
+            outgoing
+                .entry(relation.relation.from.clone())
+                .or_default()
+                .push(index);
+            incoming
+                .entry(relation.relation.to.clone())
+                .or_default()
+                .push(index);
         }
 
-        state
-            .relations
-            .retain(|relation| relation.snapshot != batch.snapshot);
-        state.relations.extend(batch.relations);
+        let mut state = self.state.write().await;
+        state.snapshots.insert(
+            batch.snapshot,
+            SnapshotState {
+                record,
+                entities,
+                relations,
+                outgoing,
+                incoming,
+            },
+        );
         Ok(())
     }
 
@@ -211,9 +231,9 @@ impl DetamuStore for InMemoryStore {
             .state
             .read()
             .await
-            .entities
-            .get(&(snapshot.clone(), entity.clone()))
-            .cloned())
+            .snapshots
+            .get(snapshot)
+            .and_then(|state| state.entities.get(entity).cloned()))
     }
 
     async fn relations(
@@ -222,30 +242,57 @@ impl DetamuStore for InMemoryStore {
         entity: &EntityId,
         direction: RelationDirection,
     ) -> Result<Vec<RelationObservation>, StoreError> {
-        let relations = self
-            .state
-            .read()
-            .await
-            .relations
-            .iter()
-            .filter(|observation| {
-                observation.snapshot == *snapshot
-                    && match direction {
-                        RelationDirection::Incoming => observation.relation.to == *entity,
-                        RelationDirection::Outgoing => observation.relation.from == *entity,
-                        RelationDirection::Both => {
-                            observation.relation.from == *entity
-                                || observation.relation.to == *entity
-                        }
-                    }
-            })
-            .cloned()
-            .collect();
-        Ok(relations)
+        let state = self.state.read().await;
+        let Some(snapshot) = state.snapshots.get(snapshot) else {
+            return Ok(Vec::new());
+        };
+        let mut indexes = match direction {
+            RelationDirection::Outgoing => snapshot
+                .outgoing
+                .get(entity)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .to_vec(),
+            RelationDirection::Incoming => snapshot
+                .incoming
+                .get(entity)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .to_vec(),
+            RelationDirection::Both => {
+                let mut indexes = snapshot
+                    .outgoing
+                    .get(entity)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                    .to_vec();
+                if let Some(incoming) = snapshot.incoming.get(entity) {
+                    indexes.extend(
+                        incoming
+                            .iter()
+                            .copied()
+                            .filter(|index| snapshot.relations[*index].relation.from != *entity),
+                    );
+                }
+                indexes.sort_unstable();
+                indexes
+            }
+        };
+        indexes.dedup();
+        Ok(indexes
+            .into_iter()
+            .map(|index| snapshot.relations[index].clone())
+            .collect())
     }
 
     async fn snapshot(&self, snapshot: &SnapshotId) -> Result<Option<SnapshotRecord>, StoreError> {
-        Ok(self.state.read().await.snapshots.get(snapshot).cloned())
+        Ok(self
+            .state
+            .read()
+            .await
+            .snapshots
+            .get(snapshot)
+            .map(|state| state.record.clone()))
     }
 
     async fn snapshots(&self, world: Option<&WorldId>) -> Result<Vec<SnapshotRecord>, StoreError> {
@@ -255,6 +302,7 @@ impl DetamuStore for InMemoryStore {
             .await
             .snapshots
             .values()
+            .map(|state| &state.record)
             .filter(|record| world.is_none_or(|world| record.snapshot.world == *world))
             .cloned()
             .collect::<Vec<_>>();
@@ -278,11 +326,10 @@ impl DetamuStore for InMemoryStore {
             .state
             .read()
             .await
-            .entities
-            .iter()
-            .filter(|((candidate, _), _)| candidate == snapshot)
-            .map(|(_, observation)| observation.clone())
-            .collect::<Vec<_>>();
+            .snapshots
+            .get(snapshot)
+            .map(|state| state.entities.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
         entities.sort_by(|left, right| left.entity.id.as_str().cmp(right.entity.id.as_str()));
         Ok(entities)
     }
@@ -295,11 +342,10 @@ impl DetamuStore for InMemoryStore {
             .state
             .read()
             .await
-            .relations
-            .iter()
-            .filter(|observation| observation.snapshot == *snapshot)
-            .cloned()
-            .collect::<Vec<_>>();
+            .snapshots
+            .get(snapshot)
+            .map(|state| state.relations.clone())
+            .unwrap_or_default();
         relations.sort_by(|left, right| left.relation.id.as_str().cmp(right.relation.id.as_str()));
         Ok(relations)
     }

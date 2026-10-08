@@ -69,34 +69,55 @@ impl<C: Connection> SurrealStore<C> {
         Ok(())
     }
 
-    async fn ingest_transaction(&self, batch: ObservationBatch) -> Result<(), SurrealStoreError> {
+    async fn ingest_transaction(
+        &self,
+        mut batch: ObservationBatch,
+    ) -> Result<(), SurrealStoreError> {
         let world_id = batch.snapshot.world.as_str().to_owned();
         let snapshot_version = batch.snapshot.version.as_str().to_owned();
-        let entities = batch
-            .entities
-            .iter()
-            .map(entity_row)
-            .collect::<Result<Vec<_>, _>>()?;
-        let relations = batch
-            .relations
-            .iter()
-            .map(relation_row)
-            .collect::<Result<Vec<_>, _>>()?;
         let snapshot = snapshot_row(&batch)?;
+        let write_batch_size = self.write_batch_size;
         let transaction = self.db.clone().begin().await?;
         let result = async {
             transaction.query("DELETE detamu_relation_observation WHERE world_id = $world_id AND snapshot_version = $snapshot_version").bind(("world_id", world_id.clone())).bind(("snapshot_version", snapshot_version.clone())).await?.check()?;
             transaction.query("DELETE detamu_entity_observation WHERE world_id = $world_id AND snapshot_version = $snapshot_version").bind(("world_id", world_id.clone())).bind(("snapshot_version", snapshot_version.clone())).await?.check()?;
             transaction.query("DELETE detamu_snapshot WHERE world_id = $world_id AND snapshot_version = $snapshot_version").bind(("world_id", world_id)).bind(("snapshot_version", snapshot_version)).await?.check()?;
-            for rows in entities.chunks(self.write_batch_size) {
-                transaction.query("INSERT INTO detamu_entity_observation $rows").bind(("rows", rows.to_vec())).await?.check()?;
+            while !batch.entities.is_empty() {
+                let count = write_batch_size.min(batch.entities.len());
+                let rows = batch
+                    .entities
+                    .drain(..count)
+                    .map(|observation| entity_row(&observation))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(WriteError::Serialization)?;
+                transaction
+                    .query("INSERT INTO detamu_entity_observation $rows")
+                    .bind(("rows", rows))
+                    .await?
+                    .check()?;
             }
-            for rows in relations.chunks(self.write_batch_size) {
-                transaction.query("INSERT INTO detamu_relation_observation $rows").bind(("rows", rows.to_vec())).await?.check()?;
+            while !batch.relations.is_empty() {
+                let count = write_batch_size.min(batch.relations.len());
+                let rows = batch
+                    .relations
+                    .drain(..count)
+                    .map(|observation| relation_row(&observation))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(WriteError::Serialization)?;
+                transaction
+                    .query("INSERT INTO detamu_relation_observation $rows")
+                    .bind(("rows", rows))
+                    .await?
+                    .check()?;
             }
-            transaction.query("INSERT INTO detamu_snapshot $row").bind(("row", snapshot)).await?.check()?;
-            Ok::<(), surrealdb::Error>(())
-        }.await;
+            transaction
+                .query("INSERT INTO detamu_snapshot $row")
+                .bind(("row", snapshot))
+                .await?
+                .check()?;
+            Ok::<(), WriteError>(())
+        }
+        .await;
         match result {
             Ok(()) => {
                 transaction.commit().await?;
@@ -106,6 +127,26 @@ impl<C: Connection> SurrealStore<C> {
                 let _ = transaction.cancel().await;
                 Err(error.into())
             }
+        }
+    }
+}
+
+enum WriteError {
+    Database(surrealdb::Error),
+    Serialization(serde_json::Error),
+}
+
+impl From<surrealdb::Error> for WriteError {
+    fn from(error: surrealdb::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<WriteError> for SurrealStoreError {
+    fn from(error: WriteError) -> Self {
+        match error {
+            WriteError::Database(error) => Self::Database(error),
+            WriteError::Serialization(error) => Self::Serialization(error),
         }
     }
 }

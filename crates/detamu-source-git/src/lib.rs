@@ -7,9 +7,10 @@
 mod history;
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     process::{Output, Stdio},
+    sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
@@ -24,7 +25,7 @@ use detamu_model_code::{
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 pub const GIT_SOURCE_KIND: &str = "git_repository";
@@ -117,20 +118,74 @@ impl GitRepositorySource {
     pub async fn tracked_files(
         snapshot: &RepositorySnapshot,
     ) -> Result<Vec<TrackedFile>, SourceError> {
-        let output = git(
-            &snapshot.root,
-            &[
-                "ls-tree",
-                "-r",
-                "-z",
-                "-l",
-                "--full-tree",
-                snapshot.commit.as_str(),
-            ],
-        )
-        .await?;
-        parse_tree(&output.stdout)
+        Ok(cached_inventory(snapshot).await?.files.as_ref().clone())
     }
+}
+
+struct RepositoryInventory {
+    files: Arc<Vec<TrackedFile>>,
+    histories: Arc<HashMap<String, FileHistory>>,
+}
+
+struct InventoryKey {
+    root: PathBuf,
+    commit: String,
+}
+
+fn inventory_slot() -> &'static Mutex<Option<(InventoryKey, Arc<RepositoryInventory>)>> {
+    static CACHE: Mutex<Option<(InventoryKey, Arc<RepositoryInventory>)>> = Mutex::new(None);
+    &CACHE
+}
+
+async fn cached_inventory(
+    snapshot: &RepositorySnapshot,
+) -> Result<Arc<RepositoryInventory>, SourceError> {
+    let commit = snapshot.commit.as_str().to_owned();
+    {
+        let cache = inventory_slot()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((key, inventory)) = cache.as_ref()
+            && key.root == snapshot.root
+            && key.commit == commit
+        {
+            return Ok(Arc::clone(inventory));
+        }
+    }
+
+    let inventory = Arc::new(RepositoryInventory {
+        files: Arc::new(read_tracked_files(snapshot).await?),
+        histories: Arc::new(history::load_file_histories(snapshot).await?),
+    });
+    let mut cache = inventory_slot()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    *cache = Some((
+        InventoryKey {
+            root: snapshot.root.clone(),
+            commit,
+        },
+        Arc::clone(&inventory),
+    ));
+    Ok(inventory)
+}
+
+async fn read_tracked_files(
+    snapshot: &RepositorySnapshot,
+) -> Result<Vec<TrackedFile>, SourceError> {
+    let output = git(
+        &snapshot.root,
+        &[
+            "ls-tree",
+            "-r",
+            "-z",
+            "-l",
+            "--full-tree",
+            snapshot.commit.as_str(),
+        ],
+    )
+    .await?;
+    parse_tree(&output.stdout)
 }
 
 #[async_trait]
@@ -186,20 +241,18 @@ impl ArtifactReader for GitRepositorySource {
         let snapshot = Self::inspect(&source.locator, Some(commit))
             .await
             .map_err(|error| ArtifactError::Failed(error.to_string()))?;
-        let files = Self::tracked_files(&snapshot)
+        let inventory = cached_inventory(&snapshot)
             .await
             .map_err(|error| ArtifactError::Failed(error.to_string()))?;
-        let histories = Self::file_histories(&snapshot)
-            .await
-            .map_err(|error| ArtifactError::Failed(error.to_string()))?;
-        Ok(files
-            .into_iter()
+        Ok(inventory
+            .files
+            .iter()
             .map(|file| {
                 let history = file
                     .language
                     .as_ref()
-                    .and_then(|_| histories.get(&file.path));
-                artifact(&file, history)
+                    .and_then(|_| inventory.histories.get(&file.path));
+                artifact(file, history)
             })
             .collect())
     }
@@ -213,6 +266,9 @@ impl ArtifactReader for GitRepositorySource {
             .cursor
             .as_deref()
             .ok_or_else(|| ArtifactError::Failed("Git source cursor is missing".to_owned()))?;
+        if artifacts.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut child = Command::new("git")
             .arg("-C")
             .arg(&source.locator)
@@ -230,6 +286,10 @@ impl ArtifactReader for GitRepositorySource {
             .stdout
             .take()
             .ok_or_else(|| ArtifactError::Failed("Git stdout is unavailable".to_owned()))?;
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| ArtifactError::Failed("Git stderr is unavailable".to_owned()))?;
         let requests = artifacts
             .iter()
             .map(|artifact| {
@@ -245,27 +305,96 @@ impl ArtifactReader for GitRepositorySource {
             stdin.write_all(requests.as_bytes()).await?;
             stdin.shutdown().await
         });
-        let mut output = Vec::new();
-        stdout
-            .read_to_end(&mut output)
+        let stderr_task = tokio::spawn(async move {
+            let mut stderr_bytes = Vec::new();
+            let _ = stderr.read_to_end(&mut stderr_bytes).await;
+            stderr_bytes
+        });
+        let read = read_batch_objects(&mut stdout, artifacts).await;
+        let write = writer
             .await
-            .map_err(|error| ArtifactError::Failed(format!("read Git objects: {error}")))?;
-        writer
-            .await
-            .map_err(|error| ArtifactError::Failed(format!("write Git requests: {error}")))?
             .map_err(|error| ArtifactError::Failed(format!("write Git requests: {error}")))?;
-        let completed = child
-            .wait_with_output()
+        let status = child
+            .wait()
             .await
             .map_err(|error| ArtifactError::Failed(format!("wait for Git: {error}")))?;
-        if !completed.status.success() {
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+        if !status.success() {
             return Err(ArtifactError::Failed(format!(
                 "git cat-file: {}",
-                String::from_utf8_lossy(&completed.stderr).trim()
+                String::from_utf8_lossy(&stderr_bytes).trim()
             )));
         }
-        parse_batch_objects(&output, artifacts)
+        write.map_err(|error| ArtifactError::Failed(format!("write Git requests: {error}")))?;
+        read
     }
+}
+
+async fn read_batch_objects(
+    stdout: &mut tokio::process::ChildStdout,
+    artifacts: &[Artifact],
+) -> Result<Vec<ArtifactContent>, ArtifactError> {
+    let mut stdout = BufReader::new(stdout);
+    let mut contents = Vec::with_capacity(artifacts.len());
+    let mut header = Vec::new();
+    for artifact in artifacts {
+        header.clear();
+        let read = stdout
+            .read_until(b'\n', &mut header)
+            .await
+            .map_err(|error| ArtifactError::Failed(format!("read Git object header: {error}")))?;
+        if read == 0 || header.last() != Some(&b'\n') {
+            return Err(ArtifactError::Failed(
+                "truncated Git object header".to_owned(),
+            ));
+        }
+        header.pop();
+        let header = std::str::from_utf8(&header)
+            .map_err(|_| ArtifactError::Failed("non-UTF-8 Git object header".to_owned()))?;
+        let mut fields = header.split_whitespace();
+        let object_id = fields
+            .next()
+            .ok_or_else(|| ArtifactError::Failed(format!("Git object is not a blob: {header}")))?;
+        let object_type = fields
+            .next()
+            .ok_or_else(|| ArtifactError::Failed(format!("Git object is not a blob: {header}")))?;
+        let size = fields
+            .next()
+            .ok_or_else(|| ArtifactError::Failed(format!("Git object is not a blob: {header}")))?;
+        if object_type != "blob" || fields.next().is_some() {
+            return Err(ArtifactError::Failed(format!(
+                "Git object is not a blob: {header}"
+            )));
+        }
+        if object_id != artifact.content_id {
+            return Err(ArtifactError::Failed(format!(
+                "Git returned {object_id} for expected blob {}",
+                artifact.content_id
+            )));
+        }
+        let size = size
+            .parse::<usize>()
+            .map_err(|error| ArtifactError::Failed(format!("invalid Git blob size: {error}")))?;
+        let mut bytes = vec![0; size];
+        stdout
+            .read_exact(&mut bytes)
+            .await
+            .map_err(|error| ArtifactError::Failed(format!("truncated Git blob: {error}")))?;
+        let mut newline = [0; 1];
+        stdout.read_exact(&mut newline).await.map_err(|error| {
+            ArtifactError::Failed(format!("malformed Git blob terminator: {error}"))
+        })?;
+        if newline[0] != b'\n' {
+            return Err(ArtifactError::Failed(
+                "malformed Git blob terminator".to_owned(),
+            ));
+        }
+        contents.push(ArtifactContent {
+            artifact: artifact.clone(),
+            bytes,
+        });
+    }
+    Ok(contents)
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -307,10 +436,7 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
                 "Git source resolved to a different snapshot".to_owned(),
             ));
         }
-        let files = GitRepositorySource::tracked_files(&snapshot)
-            .await
-            .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
-        let histories = GitRepositorySource::file_histories(&snapshot)
+        let inventory = cached_inventory(&snapshot)
             .await
             .map_err(|error| AnalyzerError::Failed(error.to_string()))?;
         let revision = snapshot.revision();
@@ -322,7 +448,8 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
             configuration_digest: None,
             source: Some(snapshot.root.to_string_lossy().into_owned()),
         });
-        batch.entities = files
+        batch.entities = inventory
+            .files
             .iter()
             .filter_map(|file| {
                 let language = file.language.as_ref()?;
@@ -333,7 +460,7 @@ impl ModelAnalyzer for GitRepositoryAnalyzer {
                     &file.mode,
                     file.size,
                     language,
-                    histories.get(&file.path),
+                    inventory.histories.get(&file.path),
                 )
                 .into()
             })
@@ -405,54 +532,6 @@ fn media_type(language: &LanguageId) -> Option<&'static str> {
         "cpp" => Some("text/x-c++"),
         _ => None,
     }
-}
-
-fn parse_batch_objects(
-    bytes: &[u8],
-    artifacts: &[Artifact],
-) -> Result<Vec<ArtifactContent>, ArtifactError> {
-    let mut offset = 0;
-    let mut contents = Vec::with_capacity(artifacts.len());
-    for artifact in artifacts {
-        let header_end = bytes[offset..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map(|position| offset + position)
-            .ok_or_else(|| ArtifactError::Failed("truncated Git object header".to_owned()))?;
-        let header = std::str::from_utf8(&bytes[offset..header_end])
-            .map_err(|_| ArtifactError::Failed("non-UTF-8 Git object header".to_owned()))?;
-        let fields = header.split_whitespace().collect::<Vec<_>>();
-        if fields.len() != 3 || fields[1] != "blob" {
-            return Err(ArtifactError::Failed(format!(
-                "Git object is not a blob: {header}"
-            )));
-        }
-        if fields[0] != artifact.content_id {
-            return Err(ArtifactError::Failed(format!(
-                "Git returned {} for expected blob {}",
-                fields[0], artifact.content_id
-            )));
-        }
-        let size = fields[2]
-            .parse::<usize>()
-            .map_err(|error| ArtifactError::Failed(format!("invalid Git blob size: {error}")))?;
-        let content_start = header_end + 1;
-        let content_end = content_start
-            .checked_add(size)
-            .filter(|end| *end < bytes.len())
-            .ok_or_else(|| ArtifactError::Failed("truncated Git blob".to_owned()))?;
-        if bytes[content_end] != b'\n' {
-            return Err(ArtifactError::Failed(
-                "malformed Git blob terminator".to_owned(),
-            ));
-        }
-        contents.push(ArtifactContent {
-            artifact: artifact.clone(),
-            bytes: bytes[content_start..content_end].to_vec(),
-        });
-        offset = content_end + 1;
-    }
-    Ok(contents)
 }
 
 fn normalize_remote(remote: &str) -> Option<String> {

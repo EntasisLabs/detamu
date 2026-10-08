@@ -1,6 +1,10 @@
 //! Rust syntax analyzer for the Detamu code world model.
 
-use std::{collections::BTreeSet, path::Path, sync::Arc};
+use std::{
+    collections::BTreeSet,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 use detamu_core::ObservationBatch;
 use detamu_language::LanguagePack;
@@ -100,6 +104,11 @@ impl TreeSitterSpec for RustTreeSitterSpec {
     }
 }
 
+fn rust_language() -> LanguageId {
+    static LANGUAGE: OnceLock<LanguageId> = OnceLock::new();
+    LANGUAGE.get_or_init(|| LanguageId::new("rust")).clone()
+}
+
 fn collect_imports(
     revision: &RevisionId,
     root: Node<'_>,
@@ -109,7 +118,7 @@ fn collect_imports(
 ) {
     let mut imports = BTreeSet::new();
     collect_import_paths(root, source, &mut imports);
-    let language = LanguageId::new("rust");
+    let language = rust_language();
     for import_path in imports {
         batch.entities.push(imported_module_observation(
             revision,
@@ -168,7 +177,7 @@ fn collect_symbols(
             revision,
             CodeSymbol {
                 id: symbol_id.clone(),
-                language: LanguageId::new("rust"),
+                language: rust_language(),
                 qualified_name,
                 kind,
             },
