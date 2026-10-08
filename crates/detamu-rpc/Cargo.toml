@@ -1,6 +1,6 @@
 [package]
-name = "detamu-sdk"
-description = "Embeddable world-model orchestration SDK for Detamu"
+name = "detamu-rpc"
+description = "JSON-RPC handler for Detamu code queries and language-server registration"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -15,10 +15,13 @@ rust-version.workspace = true
 [dependencies]
 async-trait.workspace = true
 detamu-core.workspace = true
-detamu-model.workspace = true
+detamu-language-lsp.workspace = true
+detamu-model-code.workspace = true
+detamu-query.workspace = true
+detamu-query-code.workspace = true
+detamu-sdk.workspace = true
 detamu-store.workspace = true
-thiserror.workspace = true
-tokio.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

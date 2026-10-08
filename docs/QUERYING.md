@@ -98,6 +98,33 @@ database, then launched by the next `detamu index`:
 
 The same registration is available as `detamu lsp register`.
 
+Embedders attach that same handler to a stream they already own. `with_listener`
+takes a TCP socket, a Unix socket, standard input, or any custom
+[`StreamListener`](https://docs.rs/detamu-sdk/latest/detamu_sdk/trait.StreamListener.html):
+
+```rust,no_run
+use std::sync::Arc;
+use detamu::rpc::CodeRouter;
+use detamu::sdk::{Detamu, TcpListenerAdapter};
+use detamu::store::DetamuStore;
+
+# async fn serve(store: Arc<dyn DetamuStore>) -> Result<(), detamu::sdk::ListenerError> {
+let store = Arc::clone(&store);
+Detamu::builder(Arc::clone(&store))
+    .with_listener(TcpListenerAdapter::bind("127.0.0.1:9339").await?)
+    .build()
+    .serve(CodeRouter::new(store, "./data/detamu.surrealkv"))
+    .await?;
+# Ok(())
+# }
+```
+
+`StdioListenerAdapter` reads request lines until stdin closes.
+`UnixListenerAdapter` binds a filesystem socket. A custom adapter implements
+`StreamListener` and wraps its reader and writer with `ListenerSession::new`.
+TCP and Unix sessions close after one exchange, matching the CLI. Enable the
+`rpc` feature (it is included in `full`) for `CodeRouter`.
+
 ## Rust SDK
 
 Both facades accept `Arc<dyn DetamuStore>`, so embedded clients can use the

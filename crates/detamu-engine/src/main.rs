@@ -3,7 +3,7 @@ use std::{process::ExitCode, sync::Arc};
 use detamu_code_coverage::CodeCoverageDeriver;
 use detamu_language::LanguagePack;
 use detamu_language_lizard::LizardAnalyzer;
-use detamu_language_lsp::RegisteredLsp;
+use detamu_language_lsp::{LspRegistry, RegisteredLsp};
 use detamu_language_rust::RustLanguagePack;
 use detamu_language_rust_analyzer::RustAnalyzer;
 use detamu_model::{ArtifactReader, SourceRequest};
@@ -185,7 +185,7 @@ async fn index_repository(repository: &str, path: &str, options: &IndexOptions) 
             RustAnalyzer::new(Arc::clone(&source))
                 .with_executable(rust_analyzer_runtime.executable),
         ));
-    let registrations = match lsp_registry::LspRegistry::load(std::path::Path::new(path)) {
+    let registrations = match LspRegistry::load(std::path::Path::new(path)) {
         Ok(registry) => registry.registrations().to_vec(),
         Err(error) => {
             eprintln!("failed to load language server registry: {error}");
@@ -416,6 +416,5 @@ fn serve_usage() -> &'static str {
 }
 
 mod lsp_commands;
-mod lsp_registry;
 mod query_commands;
 mod rpc;

@@ -1,5 +1,15 @@
 //! Embeddable, world-model-agnostic Detamu orchestration facade.
 
+mod listener;
+
+pub use listener::{
+    ClosureHandler, LineHandler, ListenerError, ListenerSession, SessionMode, StdioListenerAdapter,
+    StreamListener, TcpListenerAdapter,
+};
+
+#[cfg(unix)]
+pub use listener::UnixListenerAdapter;
+
 use std::sync::Arc;
 
 use detamu_core::{
@@ -51,6 +61,7 @@ pub struct Detamu {
     analyzers: Vec<Arc<dyn ModelAnalyzer>>,
     derivers: Vec<Arc<dyn ObservationDeriver>>,
     scoring_models: Vec<Arc<dyn ScoringModel>>,
+    listeners: Vec<Box<dyn StreamListener>>,
 }
 
 impl Detamu {
@@ -60,6 +71,7 @@ impl Detamu {
             analyzers: Vec::new(),
             derivers: Vec::new(),
             scoring_models: Vec::new(),
+            listeners: Vec::new(),
         }
     }
 
@@ -165,6 +177,20 @@ impl Detamu {
     pub fn store(&self) -> &Arc<dyn DetamuStore> {
         &self.store
     }
+
+    /// Serves every listener registered with [`DetamuBuilder::with_listener`].
+    ///
+    /// TCP and Unix adapters accept until the process stops. A stdio adapter
+    /// returns after stdin reaches EOF. The call fails immediately when no
+    /// listener was registered.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no listener is registered, accepting a session
+    /// fails, or a listener task stops.
+    pub async fn serve(self, handler: impl LineHandler + 'static) -> Result<(), ListenerError> {
+        listener::serve_listeners(self.listeners, Arc::new(handler)).await
+    }
 }
 
 pub struct DetamuBuilder {
@@ -172,6 +198,7 @@ pub struct DetamuBuilder {
     analyzers: Vec<Arc<dyn ModelAnalyzer>>,
     derivers: Vec<Arc<dyn ObservationDeriver>>,
     scoring_models: Vec<Arc<dyn ScoringModel>>,
+    listeners: Vec<Box<dyn StreamListener>>,
 }
 
 impl DetamuBuilder {
@@ -211,12 +238,33 @@ impl DetamuBuilder {
         self
     }
 
+    /// Registers a stream adapter. Call it again to listen on more than one stream.
+    ///
+    /// ```rust,no_run
+    /// # async fn setup(store: std::sync::Arc<dyn detamu_store::DetamuStore>) -> Result<(), detamu_sdk::ListenerError> {
+    /// use detamu_sdk::{StdioListenerAdapter, TcpListenerAdapter, Detamu};
+    ///
+    /// let detamu = Detamu::builder(store)
+    ///     .with_listener(TcpListenerAdapter::bind("127.0.0.1:9339").await?)
+    ///     .with_listener(StdioListenerAdapter::new())
+    ///     .build();
+    /// # let _ = detamu;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn with_listener(mut self, listener: impl StreamListener + 'static) -> Self {
+        self.listeners.push(Box::new(listener));
+        self
+    }
+
     pub fn build(self) -> Detamu {
         Detamu {
             store: self.store,
             analyzers: self.analyzers,
             derivers: self.derivers,
             scoring_models: self.scoring_models,
+            listeners: self.listeners,
         }
     }
 }
@@ -334,5 +382,16 @@ mod tests {
         assert_eq!(report.analyzers_run, 1);
         assert_eq!(report.analyzers_skipped, 1);
         assert_eq!(report.coverage, AnalysisCoverage::Partial);
+    }
+
+    #[tokio::test]
+    async fn serve_without_a_listener_fails() {
+        let store = Arc::new(InMemoryStore::default());
+        let error = Detamu::builder(store)
+            .build()
+            .serve(ClosureHandler::new(|line| async move { line }))
+            .await
+            .expect_err("missing listener");
+        assert!(matches!(error, ListenerError::Empty));
     }
 }

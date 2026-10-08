@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use detamu_language_lsp::LspRegistration;
+use crate::LspRegistration;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

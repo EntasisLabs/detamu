@@ -88,6 +88,7 @@ Feature flags are additive:
 | `query` (default) | Snapshot lookup, filtering, traversal, diffs |
 | `runtime` (default) | Optional analyzer executable discovery |
 | `code` | Code ontology and code-aware queries |
+| `rpc` | JSON-RPC handler for those queries, including `code` |
 | `surreal` | In-memory SurrealDB and persistent SurrealKV |
 | `full` | All integrations |
 

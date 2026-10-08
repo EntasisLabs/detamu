@@ -23,6 +23,7 @@ detamu-model.workspace = true
 detamu-model-code.workspace = true
 detamu-query.workspace = true
 detamu-query-code.workspace = true
+detamu-rpc.workspace = true
 detamu-runtime.workspace = true
 detamu-language-lizard.workspace = true
 detamu-language-lsp.workspace = true

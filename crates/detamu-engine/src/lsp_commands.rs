@@ -2,10 +2,8 @@
 
 use std::{path::Path, process::ExitCode};
 
-use detamu_language_lsp::LspRegistration;
+use detamu_language_lsp::{LspRegistration, LspRegistry};
 use serde_json::{Value, json};
-
-use crate::lsp_registry::LspRegistry;
 
 pub fn run(subcommand: Option<&str>, arguments: impl Iterator<Item = String>) -> ExitCode {
     match subcommand {
