@@ -10,14 +10,14 @@ Most consumers should start with the `detamu` facade:
 
 ```toml
 [dependencies]
-detamu = "0.1"
+detamu = "0.2"
 ```
 
 Its default features expose generic queries and runtime discovery in addition to
 the kernel, model contracts, SDK, and store contract. Features are additive:
 
 ```toml
-detamu = { version = "0.1", features = ["code", "surreal"] }
+detamu = { version = "0.2", features = ["code", "surreal"] }
 ```
 
 - `query`: generic snapshot filtering, traversal, and diffs;
@@ -67,12 +67,33 @@ Inspect the current release progress without uploading anything:
 ./scripts/publish-crates.sh status
 ```
 
-## Initial release
+## Shipping a release
 
-1. Commit all release changes and ensure the worktree is clean.
-2. Authenticate using `cargo login` or the standard Cargo registry token
-   environment.
-3. Run the explicit publishing mode:
+Binary archives and crates.io are separate steps. The GitHub workflow publishes
+the `detamu` binary only. crates.io stays on this script, run by hand, with no
+registry token stored in the repository.
+
+1. Land the version bump on `main`. `[workspace.package].version` and every
+   internal `workspace.dependencies` pin must be the same value.
+2. Tag that commit and push the tag. The tag must be `v` plus the workspace
+   version (`v0.2.0` for workspace version `0.2.0`):
+
+```bash
+VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
+git tag "v${VERSION}"
+git push origin "v${VERSION}"
+```
+
+3. [`.github/workflows/release.yml`](../.github/workflows/release.yml) runs on
+   that tag. It builds release archives for Linux x86_64 (`ubuntu-24.04`),
+   macOS arm64, macOS x86_64 (`macos-15-intel`), and Windows x86_64, refuses a
+   tag that does not match the workspace version, and publishes a GitHub
+   Release containing the archives, `sha256sums.txt`, and generated notes.
+   `workflow_dispatch` can rebuild an existing `v*` tag. An empty dispatch input
+   builds the current ref and does not publish a release.
+4. Authenticate with `cargo login` or `CARGO_REGISTRY_TOKEN` on the machine
+   that will upload, then publish the crates from a clean checkout of the
+   tagged commit:
 
 ```bash
 DETAMU_PUBLISH=1 ./scripts/publish-crates.sh publish
@@ -82,10 +103,10 @@ The script publishes in dependency order and waits for each version to appear in
 the crates.io index before publishing dependents. It refuses a dirty worktree and
 requires the `DETAMU_PUBLISH=1` guard. Before each upload it checks the exact
 `crate@version` in crates.io and skips it when already published. If crates.io
-rate-limits or interrupts an initial release, wait for the reported retry time and
-run the same command again; it resumes at the first unpublished crate. A failed
+rate-limits or interrupts a release, wait for the reported retry time and run
+the same command again; it resumes at the first unpublished crate. A failed
 upload is also rechecked in case the registry accepted it but Cargo lost the
-response.
+response. `examples/index-and-query` is `publish = false` and is left out.
 
 The order is:
 
@@ -112,15 +133,17 @@ detamu
 detamu-engine
 ```
 
-After the release, verify the facade from outside the workspace and tag the exact
-published commit:
+After the crates are on the index, verify the facade and the CLI crate from
+outside the workspace:
 
 ```bash
 VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' Cargo.toml)"
 cargo info "detamu@${VERSION}"
-git tag "v${VERSION}"
-git push origin "v${VERSION}"
+cargo info "detamu-engine@${VERSION}"
 ```
+
+`scripts/install.sh` then installs the binary from the GitHub Release for that
+tag.
 
 ## Medousa dependency
 
@@ -128,7 +151,7 @@ For embedded querying, runtime discovery, and Surreal storage, Medousa can use:
 
 ```toml
 [dependencies]
-detamu = { version = "0.1", features = ["code", "runtime", "surreal"] }
+detamu = { version = "0.2", features = ["code", "runtime", "surreal"] }
 ```
 
 This does not install Lizard or language-server executables. Medousa Packages
@@ -139,11 +162,11 @@ If Medousa needs to run indexing in-process, add the analyzer crates it actually
 hosts rather than enabling a monolithic agent bundle:
 
 ```toml
-detamu-code-coverage = "0.1"
-detamu-language-lizard = "0.1"
-detamu-language-rust = "0.1"
-detamu-language-rust-analyzer = "0.1"
-detamu-source-git = "0.1"
+detamu-code-coverage = "0.2"
+detamu-language-lizard = "0.2"
+detamu-language-rust = "0.2"
+detamu-language-rust-analyzer = "0.2"
+detamu-source-git = "0.2"
 ```
 
 This preserves Detamu's hexagonal boundary: the facade supplies contracts and

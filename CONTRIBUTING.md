@@ -10,10 +10,15 @@ and consumers.
 2. Run the workspace checks from the repository root:
 
 ```bash
-cargo fmt --all
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --locked
 ```
+
+GitHub Actions runs the same commands on pull requests and on pushes to `main`.
+The live rust-analyzer test prints a skip line and returns unless
+`DETAMU_RUST_ANALYZER` points at an executable. Lizard tests use checked-in CSV
+fixtures.
 
 3. Keep changes scoped. Prefer extending model packs and analyzers through
    normalized observations rather than adding domain logic to `detamu-core` or
