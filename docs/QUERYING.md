@@ -47,6 +47,12 @@ detamu-engine find DB WORLD SNAPSHOT [--path PATH] [--line LINE]
 detamu-engine impact DB WORLD SNAPSHOT ENTITY [--depth N] [--max-nodes N]
 detamu-engine diff DB WORLD FROM_SNAPSHOT TO_SNAPSHOT
 detamu-engine gaps DB WORLD SNAPSHOT
+detamu-engine dependencies DB WORLD SNAPSHOT ENTITY [--direction both] [--depth N]
+detamu-engine patterns DB WORLD SNAPSHOT --stability N --logic N --friction N --autonomy N
+    [--threshold 0.8] [--limit 50]
+detamu-engine friction DB WORLD SNAPSHOT [--min 0.7] [--limit 20]
+detamu-engine unstable DB WORLD SNAPSHOT [--max 0.4] [--limit 20]
+detamu-engine stats DB WORLD SNAPSHOT
 ```
 
 All commands also accept `--namespace` and `--database`; both default to
@@ -61,6 +67,36 @@ cycle-safe and explicitly reports truncation when `--max-nodes` is reached.
 copied unchanged into a later commit is not reported as changed. `gaps` reports
 which scoreable code entities lack each required AVEC measurement or score; it
 does not reinterpret missing semantic or coverage evidence as zero.
+
+`dependencies` walks call, reference, import, implementation, and inheritance
+edges in either direction. Omit `--depth` to keep walking until `--max-nodes`.
+`patterns` ranks symbols by Euclidean distance in AVEC space. A threshold of 0.8
+keeps distances of 0.2 or less. `friction` and `unstable` use the ACC defaults
+of 0.7 and 0.4. `stats` reports means only for symbols that actually have AVEC
+scores.
+
+## JSON-RPC
+
+`detamu serve DB [--bind 127.0.0.1] [--port 9339]` speaks newline-delimited
+JSON-RPC 2.0. Each connection carries one request and one response, the same
+exchange ACC used. Methods accept a `detamu.` or `acc.` prefix:
+
+```text
+getNode, queryRelations, queryDependencies, queryPatterns, search,
+getHighFriction, getUnstable, getStats,
+registerLsp, unregisterLsp, listLsp
+```
+
+Query params take `world` and `snapshot`. When the database holds exactly one
+snapshot, those two fields can be omitted. `maxDepth: -1` means unlimited.
+Language servers are registered over the same socket and stored beside the
+database, then launched by the next `detamu index`:
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"detamu.registerLsp","params":{"id":"python","language":"python","command":"pyright-langserver","arguments":["--stdio"],"extensions":["py"]}}
+```
+
+The same registration is available as `detamu lsp register`.
 
 ## Rust SDK
 

@@ -31,6 +31,19 @@ pub struct StabilityWeights {
     pub churn_normalize: f64,
     pub contributor_cap: f64,
     pub test_base_bias: f64,
+    /// Share of the test bonus taken from line coverage. ACC's default is 0.5.
+    #[serde(default = "half")]
+    pub test_line_weight: f64,
+    /// Share of the test bonus taken from branch coverage. ACC's default is 0.5.
+    #[serde(default = "half")]
+    pub test_branch_weight: f64,
+    /// Divisor for line coverage. Detamu stores a 0–1 ratio, so this is 1.
+    /// ACC divides a 0–100 percentage by 100, which is the same ratio.
+    #[serde(default = "one")]
+    pub test_line_normalize: f64,
+    /// Divisor for branch coverage. See [`Self::test_line_normalize`].
+    #[serde(default = "one")]
+    pub test_branch_normalize: f64,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct LogicWeights {
@@ -67,7 +80,15 @@ impl AvecWeights {
         let churn_penalty = (churn_factor / self.stability.churn_normalize).min(1.0);
         let contributor_penalty =
             (f64::from(metrics.git_contributors) / self.stability.contributor_cap).min(1.0);
-        let test_bonus = f64::midpoint(metrics.test_line_coverage, metrics.test_branch_coverage);
+        let test_bonus = coverage_term(
+            metrics.test_line_coverage,
+            self.stability.test_line_normalize,
+            self.stability.test_line_weight,
+        ) + coverage_term(
+            metrics.test_branch_coverage,
+            self.stability.test_branch_normalize,
+            self.stability.test_branch_weight,
+        );
         let stability = clamp01(
             (1.0 - churn_penalty * self.stability.churn)
                 * (1.0 - contributor_penalty * self.stability.contributor)
@@ -105,6 +126,10 @@ impl AvecWeights {
         let dependency_ratio = f64::from(metrics.outgoing_edges) / f64::from(total_degree);
         let absolute_load =
             (f64::from(metrics.outgoing_edges) / self.autonomy.outgoing_cap).min(1.0);
+        // The shipped ACC calculator multiplies both terms by `DependencyRatio`
+        // and never reads `AbsoluteCount`. The weights and the comment beside
+        // that code say 80% ratio and 20% absolute blast radius. This is that
+        // weighting.
         let autonomy = clamp01(
             (1.0 - dependency_ratio) * self.autonomy.dependency_ratio
                 + (1.0 - absolute_load) * self.autonomy.absolute_count,
@@ -129,6 +154,10 @@ impl Default for AvecWeights {
                 churn_normalize: 10.0,
                 contributor_cap: 5.0,
                 test_base_bias: 0.5,
+                test_line_weight: 0.5,
+                test_branch_weight: 0.5,
+                test_line_normalize: 1.0,
+                test_branch_normalize: 1.0,
             },
             logic: LogicWeights {
                 complexity: 0.7,
@@ -217,6 +246,19 @@ fn clamp01(value: f64) -> f64 {
     value.clamp(0.0, 1.0)
 }
 
+fn half() -> f64 {
+    0.5
+}
+
+fn one() -> f64 {
+    1.0
+}
+
+fn coverage_term(coverage: f64, normalize: f64, weight: f64) -> f64 {
+    let scale = if normalize == 0.0 { 1.0 } else { normalize };
+    (coverage / scale) * weight
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +331,39 @@ mod tests {
             ..NodeMetrics::default()
         });
         assert!(isolated.autonomy > coupled.autonomy);
+    }
+
+    #[test]
+    fn ratio_coverage_matches_acc_percent_inputs() {
+        let scores = AvecWeights::default().calculate(&NodeMetrics {
+            lines_of_code: 12,
+            cyclomatic_complexity: 2,
+            parameters: 1,
+            incoming_edges: 0,
+            outgoing_edges: 1,
+            git_total_commits: 3,
+            git_contributors: 1,
+            git_average_days_between_changes: 4.0,
+            test_line_coverage: 0.8,
+            test_branch_coverage: 0.6,
+        });
+        // ACC: churn 3/4 / 10, contributors 1/5, test bonus
+        // (80/100)*0.5 + (60/100)*0.5, then the three stability factors.
+        assert!((scores.stability - 0.647_378).abs() < 1e-6);
+        assert!((scores.logic - 1.0).abs() < 1e-9);
+        assert!((scores.friction - 0.0516).abs() < 1e-9);
+        // 80% of a fully dependent ratio plus 20% of the remaining blast radius.
+        assert!((scores.autonomy - 0.193_333_333).abs() < 1e-6);
+    }
+
+    #[test]
+    fn full_ratio_coverage_matches_acc_hundred_percent() {
+        let ratio = AvecWeights::default().calculate(&NodeMetrics {
+            test_line_coverage: 1.0,
+            test_branch_coverage: 1.0,
+            ..NodeMetrics::default()
+        });
+        let percent_equivalent = 0.5 + (1.0 * 0.5 + 1.0 * 0.5) * 0.3;
+        assert!((ratio.stability - percent_equivalent).abs() < 1e-12);
     }
 }

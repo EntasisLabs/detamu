@@ -2,8 +2,10 @@
 
 use std::{collections::BTreeSet, sync::Arc};
 
-use detamu_core::{Attributes, EntityId, EntityObservation, SnapshotId};
-use detamu_model_code::{AVEC_REQUIRED_MEASUREMENTS, AVEC_SCORE_DIMENSIONS, CODE_MODEL_ID};
+use detamu_core::{Attributes, EntityId, EntityObservation, RelationObservation, SnapshotId};
+use detamu_model_code::{
+    AVEC_REQUIRED_MEASUREMENTS, AVEC_SCORE_DIMENSIONS, AvecScores, CODE_MODEL_ID,
+};
 use detamu_query::{
     EntityFilter, GraphRequest, GraphTraversal, QUERY_SCHEMA_VERSION, QueryError, SnapshotQuery,
 };
@@ -72,6 +74,74 @@ pub struct AnalysisGapReport {
     pub scoreable_entities: usize,
     pub fully_scored_entities: usize,
     pub gaps: Vec<EntityAnalysisGap>,
+}
+
+pub const PATTERN_THRESHOLD: f64 = 0.8;
+pub const PATTERN_LIMIT: usize = 50;
+pub const FRICTION_MINIMUM: f64 = 0.7;
+pub const UNSTABLE_MAXIMUM: f64 = 0.4;
+pub const RANK_LIMIT: usize = 20;
+const SCORE_MODEL: &str = "avec.code";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeEdge {
+    pub kind: String,
+    pub weight: f64,
+    pub entity: EntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeNode {
+    pub schema_version: u32,
+    pub id: EntityId,
+    pub kind: String,
+    pub language: Option<String>,
+    pub name: String,
+    pub namespace: Option<String>,
+    pub signature: Option<String>,
+    pub file_path: Option<String>,
+    pub line_start: Option<u32>,
+    pub line_end: Option<u32>,
+    pub incoming_edges: Option<u32>,
+    pub outgoing_edges: Option<u32>,
+    pub avec: Option<AvecScores>,
+    pub incoming: Vec<CodeEdge>,
+    pub outgoing: Vec<CodeEdge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CodeDependencies {
+    pub schema_version: u32,
+    pub snapshot: SnapshotId,
+    pub root: EntityId,
+    pub direction: RelationDirection,
+    pub nodes: Vec<DependencyHit>,
+    pub relations: Vec<RelationObservation>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DependencyHit {
+    pub depth: u32,
+    pub node: CodeNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PatternMatch {
+    pub distance: f64,
+    pub node: CodeNode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectStats {
+    pub schema_version: u32,
+    pub snapshot: SnapshotId,
+    pub code_entities: usize,
+    pub scored_entities: usize,
+    pub mean_stability: Option<f64>,
+    pub mean_logic: Option<f64>,
+    pub mean_friction: Option<f64>,
+    pub mean_autonomy: Option<f64>,
 }
 
 pub struct CodeQuery {
@@ -270,6 +340,208 @@ impl CodeQuery {
     pub fn generic(&self) -> &SnapshotQuery {
         &self.query
     }
+
+    /// Builds the query view of one entity without loading its edges.
+    #[must_use]
+    pub fn describe(observation: &EntityObservation, include_scores: bool) -> CodeNode {
+        code_node(observation, &[], include_scores)
+    }
+
+    /// Loads one code entity with its immediate dependency edges.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the backing store cannot read the snapshot.
+    pub async fn node(
+        &self,
+        snapshot: &SnapshotId,
+        entity: &EntityId,
+        include_scores: bool,
+    ) -> Result<Option<CodeNode>, QueryError> {
+        let Some(observation) = self.query.entity(snapshot, entity).await? else {
+            return Ok(None);
+        };
+        let relations = self
+            .query
+            .store()
+            .relations(snapshot, entity, RelationDirection::Both)
+            .await?;
+        Ok(Some(code_node(&observation, &relations, include_scores)))
+    }
+
+    /// Traverses dependency edges in the requested direction.
+    ///
+    /// `max_depth` of `u32::MAX` walks until `max_nodes` stops the search.
+    /// Containment edges are omitted.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the root is absent, the node limit is zero, or
+    /// the backing store cannot read the snapshot.
+    pub async fn dependencies(
+        &self,
+        snapshot: &SnapshotId,
+        entity: &EntityId,
+        direction: RelationDirection,
+        max_depth: u32,
+        max_nodes: usize,
+        include_scores: bool,
+    ) -> Result<CodeDependencies, QueryError> {
+        let graph = self
+            .query
+            .traverse(
+                snapshot,
+                &GraphRequest {
+                    root: entity.clone(),
+                    direction,
+                    max_depth,
+                    max_nodes,
+                    relation_kinds: impact_relation_kinds(),
+                },
+            )
+            .await?;
+        let nodes = graph
+            .nodes
+            .iter()
+            .map(|node| DependencyHit {
+                depth: node.depth,
+                node: code_node(&node.observation, &[], include_scores),
+            })
+            .collect();
+        Ok(CodeDependencies {
+            schema_version: QUERY_SCHEMA_VERSION,
+            snapshot: snapshot.clone(),
+            root: entity.clone(),
+            direction,
+            nodes,
+            relations: graph.relations,
+            truncated: graph.truncated,
+        })
+    }
+
+    /// Finds scored symbols near a target AVEC profile.
+    ///
+    /// Distance is Euclidean distance in the four AVEC dimensions. A threshold
+    /// of 0.8 keeps nodes whose distance is at most 0.2, matching ACC.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the threshold is outside 0..=1, the limit is zero,
+    /// or the backing store cannot enumerate the snapshot.
+    pub async fn patterns(
+        &self,
+        snapshot: &SnapshotId,
+        target: AvecScores,
+        threshold: f64,
+        limit: usize,
+    ) -> Result<Vec<PatternMatch>, QueryError> {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(QueryError::InvalidRequest(
+                "similarity threshold must be between 0 and 1".to_owned(),
+            ));
+        }
+        if limit == 0 {
+            return Err(QueryError::InvalidRequest(
+                "pattern limit must be greater than zero".to_owned(),
+            ));
+        }
+        let max_distance = 1.0 - threshold;
+        let mut matches = code_entities(self, snapshot)
+            .await?
+            .into_iter()
+            .filter_map(|observation| {
+                let profile = avec_scores(&observation)?;
+                let distance = avec_distance(profile, target);
+                (distance <= max_distance).then_some(PatternMatch {
+                    distance,
+                    node: code_node(&observation, &[], true),
+                })
+            })
+            .collect::<Vec<_>>();
+        matches.sort_by(|left, right| {
+            left.distance
+                .total_cmp(&right.distance)
+                .then_with(|| left.node.id.as_str().cmp(right.node.id.as_str()))
+        });
+        matches.truncate(limit);
+        Ok(matches)
+    }
+
+    /// Returns symbols whose friction is at least `minimum`, highest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the limit is zero or the snapshot cannot be read.
+    pub async fn high_friction(
+        &self,
+        snapshot: &SnapshotId,
+        minimum: f64,
+        limit: usize,
+    ) -> Result<Vec<CodeNode>, QueryError> {
+        ranked(
+            self,
+            snapshot,
+            limit,
+            move |scores| scores.friction >= minimum,
+            |left, right| {
+                score_dimension(right, |scores| scores.friction)
+                    .total_cmp(&score_dimension(left, |scores| scores.friction))
+            },
+        )
+        .await
+    }
+
+    /// Returns symbols whose stability is at most `maximum`, lowest first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the limit is zero or the snapshot cannot be read.
+    pub async fn unstable(
+        &self,
+        snapshot: &SnapshotId,
+        maximum: f64,
+        limit: usize,
+    ) -> Result<Vec<CodeNode>, QueryError> {
+        ranked(
+            self,
+            snapshot,
+            limit,
+            move |scores| scores.stability <= maximum,
+            |left, right| {
+                score_dimension(left, |scores| scores.stability)
+                    .total_cmp(&score_dimension(right, |scores| scores.stability))
+            },
+        )
+        .await
+    }
+
+    /// Summarizes how many code entities have AVEC scores and their means.
+    ///
+    /// Means are absent when nothing has been scored. They are not zero.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the snapshot cannot be read.
+    pub async fn stats(&self, snapshot: &SnapshotId) -> Result<ProjectStats, QueryError> {
+        let entities = code_entities(self, snapshot).await?;
+        let scored = entities.iter().filter_map(avec_scores).collect::<Vec<_>>();
+        let mean = |select: fn(AvecScores) -> f64| {
+            let count = u32::try_from(scored.len()).unwrap_or(u32::MAX);
+            (count > 0).then(|| {
+                scored.iter().map(|scores| select(*scores)).sum::<f64>() / f64::from(count)
+            })
+        };
+        Ok(ProjectStats {
+            schema_version: QUERY_SCHEMA_VERSION,
+            snapshot: snapshot.clone(),
+            code_entities: entities.len(),
+            scored_entities: scored.len(),
+            mean_stability: mean(|scores| scores.stability),
+            mean_logic: mean(|scores| scores.logic),
+            mean_friction: mean(|scores| scores.friction),
+            mean_autonomy: mean(|scores| scores.autonomy),
+        })
+    }
 }
 
 fn impact_relation_kinds() -> BTreeSet<String> {
@@ -283,12 +555,147 @@ fn u32_attribute(observation: &EntityObservation, name: &str) -> Option<u32> {
     u32::try_from(observation.attributes.get(name)?.as_u64()?).ok()
 }
 
+async fn code_entities(
+    query: &CodeQuery,
+    snapshot: &SnapshotId,
+) -> Result<Vec<EntityObservation>, QueryError> {
+    query.find(snapshot, &CodeEntityFilter::default()).await
+}
+
+async fn ranked(
+    query: &CodeQuery,
+    snapshot: &SnapshotId,
+    limit: usize,
+    accept: impl Fn(AvecScores) -> bool,
+    order: impl Fn(&CodeNode, &CodeNode) -> std::cmp::Ordering,
+) -> Result<Vec<CodeNode>, QueryError> {
+    if limit == 0 {
+        return Err(QueryError::InvalidRequest(
+            "result limit must be greater than zero".to_owned(),
+        ));
+    }
+    let mut nodes = code_entities(query, snapshot)
+        .await?
+        .into_iter()
+        .filter_map(|observation| {
+            let scores = avec_scores(&observation)?;
+            accept(scores).then(|| code_node(&observation, &[], true))
+        })
+        .collect::<Vec<_>>();
+    nodes.sort_by(|left, right| {
+        order(left, right).then_with(|| left.id.as_str().cmp(right.id.as_str()))
+    });
+    nodes.truncate(limit);
+    Ok(nodes)
+}
+
+fn code_node(
+    observation: &EntityObservation,
+    relations: &[RelationObservation],
+    include_scores: bool,
+) -> CodeNode {
+    let mut incoming = Vec::new();
+    let mut outgoing = Vec::new();
+    for relation in relations {
+        if relation.relation.kind == "contains" {
+            continue;
+        }
+        let from_self = relation.relation.from == observation.entity.id;
+        let to_self = relation.relation.to == observation.entity.id;
+        if !from_self && !to_self {
+            continue;
+        }
+        let edge = CodeEdge {
+            kind: relation.relation.kind.clone(),
+            weight: relation.weight,
+            entity: if from_self {
+                relation.relation.to.clone()
+            } else {
+                relation.relation.from.clone()
+            },
+        };
+        if from_self {
+            outgoing.push(edge);
+        } else {
+            incoming.push(edge);
+        }
+    }
+    CodeNode {
+        schema_version: QUERY_SCHEMA_VERSION,
+        id: observation.entity.id.clone(),
+        kind: observation.entity.kind.clone(),
+        language: string_attribute(observation, "language"),
+        name: observation.entity.label.clone(),
+        namespace: string_attribute(observation, "namespace"),
+        signature: string_attribute(observation, "signature"),
+        file_path: string_attribute(observation, "file_path"),
+        line_start: u32_attribute(observation, "line_start"),
+        line_end: u32_attribute(observation, "line_end"),
+        incoming_edges: count_measurement(observation, "graph.incoming_edges"),
+        outgoing_edges: count_measurement(observation, "graph.outgoing_edges"),
+        avec: include_scores.then(|| avec_scores(observation)).flatten(),
+        incoming,
+        outgoing,
+    }
+}
+
+fn string_attribute(observation: &EntityObservation, name: &str) -> Option<String> {
+    observation
+        .attributes
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn count_measurement(observation: &EntityObservation, name: &str) -> Option<u32> {
+    let value = observation
+        .measurements
+        .iter()
+        .find(|measurement| measurement.name == name)?
+        .value;
+    (value.is_finite() && value >= 0.0 && value <= f64::from(u32::MAX) && value.fract() == 0.0)
+        .then_some(value as u32)
+}
+
+fn avec_scores(observation: &EntityObservation) -> Option<AvecScores> {
+    Some(AvecScores {
+        stability: score_value(observation, "stability")?,
+        logic: score_value(observation, "logic")?,
+        friction: score_value(observation, "friction")?,
+        autonomy: score_value(observation, "autonomy")?,
+    })
+}
+
+fn score_value(observation: &EntityObservation, dimension: &str) -> Option<f64> {
+    observation
+        .scores
+        .iter()
+        .find(|score| score.model.as_str() == SCORE_MODEL && score.dimension == dimension)
+        .map(|score| score.value)
+}
+
+fn score_dimension(node: &CodeNode, select: impl Fn(AvecScores) -> f64) -> f64 {
+    node.avec.map_or(0.0, select)
+}
+
+fn avec_distance(left: AvecScores, right: AvecScores) -> f64 {
+    let deltas = [
+        left.stability - right.stability,
+        left.logic - right.logic,
+        left.friction - right.friction,
+        left.autonomy - right.autonomy,
+    ];
+    deltas.iter().map(|delta| delta * delta).sum::<f64>().sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use detamu_core::{
         Entity, Measurement, ModelId, ObservationBatch, Relation, RelationId, RelationObservation,
         Score, ScoreModelId, SnapshotVersion, WorldId,
     };
+    use detamu_model_code::AvecScores;
     use detamu_store::{DetamuStore, InMemoryStore};
 
     use super::*;
@@ -339,6 +746,70 @@ mod tests {
                 .contains(&"test.line_coverage".to_owned())
         );
         assert_eq!(report.gaps[0].missing_scores.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn rankings_follow_avec_distance_friction_and_stability() {
+        let store = Arc::new(InMemoryStore::default());
+        let snapshot = SnapshotId::new(
+            WorldId::new("code.repository:fixture"),
+            SnapshotVersion::new("v1"),
+        );
+        let mut calm = entity(&snapshot, "calm", "calm", 1, 2);
+        let mut hot = entity(&snapshot, "hot", "hot", 3, 4);
+        calm.scores = profile_scores(0.9, 0.2, 0.1, 0.8);
+        hot.scores = profile_scores(0.2, 0.2, 0.9, 0.8);
+        let mut batch = ObservationBatch::empty(snapshot.clone());
+        batch.entities = vec![calm, hot];
+        store.ingest(batch).await.expect("ingest");
+        let query = CodeQuery::new(store);
+
+        let patterns = query
+            .patterns(
+                &snapshot,
+                AvecScores {
+                    stability: 0.9,
+                    logic: 0.2,
+                    friction: 0.1,
+                    autonomy: 0.8,
+                },
+                0.8,
+                50,
+            )
+            .await
+            .expect("patterns");
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].node.id.as_str(), "calm");
+
+        let friction = query
+            .high_friction(&snapshot, 0.7, 20)
+            .await
+            .expect("friction");
+        assert_eq!(friction[0].id.as_str(), "hot");
+
+        let unstable = query.unstable(&snapshot, 0.4, 20).await.expect("unstable");
+        assert_eq!(unstable[0].id.as_str(), "hot");
+
+        let stats = query.stats(&snapshot).await.expect("stats");
+        assert_eq!(stats.scored_entities, 2);
+        assert!((stats.mean_stability.expect("mean") - 0.55).abs() < 1e-9);
+    }
+
+    fn profile_scores(stability: f64, logic: f64, friction: f64, autonomy: f64) -> Vec<Score> {
+        [
+            ("stability", stability),
+            ("logic", logic),
+            ("friction", friction),
+            ("autonomy", autonomy),
+        ]
+        .into_iter()
+        .map(|(dimension, value)| Score {
+            model: ScoreModelId::new("avec.code"),
+            version: 1,
+            dimension: dimension.to_owned(),
+            value,
+        })
+        .collect()
     }
 
     async fn fixture_store() -> (Arc<InMemoryStore>, SnapshotId) {

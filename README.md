@@ -24,8 +24,11 @@ remain authoritative for users and optional analyzer package lifecycle.
   history, Rust symbols via Tree-sitter, optional Lizard and rust-analyzer
   enrichment, and external LCOV/Cobertura coverage ingestion.
 - **Query persisted snapshots** — filter entities, locate source lines, traverse
-  reverse impact, diff snapshots, and list where scoring evidence is still
-  missing instead of inventing zeros.
+  dependencies in either direction, rank high-friction and unstable symbols,
+  find similar AVEC profiles, diff snapshots, and list where scoring evidence
+  is still missing instead of inventing zeros.
+- **Hook any language server** — register a stdio command for a language, then
+  index the committed tree through it. Queries are also available over JSON-RPC.
 - **Score code with AVEC** — four versioned dimensions for each scoreable symbol
   (see below).
 - **Embed or shell out** — compose analyzers through the SDK, or drive the same
@@ -83,6 +86,12 @@ detamu find ./data/detamu.surrealkv <WORLD> <SNAPSHOT> \
 detamu impact ./data/detamu.surrealkv <WORLD> <SNAPSHOT> <ENTITY_ID>
 
 detamu gaps ./data/detamu.surrealkv <WORLD> <SNAPSHOT>
+
+detamu lsp register ./data/detamu.surrealkv \
+  --id python --language python --command pyright-langserver \
+  --arg --stdio --ext py
+
+detamu serve ./data/detamu.surrealkv
 ```
 
 Index a specific commit without checking it out:
@@ -154,11 +163,12 @@ Details: [Architecture](ARCHITECTURE.md).
 - AVEC Code only scores when required measurements exist; incomplete analysis is
   reported by `gaps` rather than filled with zeros.
 - Broad multi-language metrics depend on an installed Lizard binary.
-- Call graphs and references depend on rust-analyzer when available.
+- Call graphs and references come from rust-analyzer, or from any language
+  server registered with `detamu lsp`.
+- JSON-RPC on port 9339 serves the same queries and language-server registration.
 
 **Next**
 
-- C# semantic adapter over the generic LSP host.
 - Richer import resolution and ACC graph golden comparisons.
 
 ## Documentation

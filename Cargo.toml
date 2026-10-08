@@ -61,7 +61,7 @@ quick-xml = "0.41"
 sha2 = "0.10"
 surrealdb = { version = "3", default-features = false, features = ["kv-mem", "kv-surrealkv"] }
 thiserror = "2"
-tokio = { version = "1", features = ["fs", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 tree-sitter = "0.26.11"
 tree-sitter-rust = "0.24.2"
 url = "2"

@@ -840,6 +840,7 @@ dependencies = [
  "detamu-core",
  "detamu-language",
  "detamu-language-lizard",
+ "detamu-language-lsp",
  "detamu-language-rust",
  "detamu-language-rust-analyzer",
  "detamu-model",
@@ -851,6 +852,7 @@ dependencies = [
  "detamu-source-git",
  "detamu-store",
  "detamu-surreal",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -897,9 +899,12 @@ dependencies = [
  "async-trait",
  "detamu-core",
  "detamu-model",
+ "detamu-model-code",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "url",
 ]
 
 [[package]]

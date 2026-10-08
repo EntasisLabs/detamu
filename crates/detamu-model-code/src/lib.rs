@@ -158,11 +158,8 @@ impl ObservationDeriver for GraphMetricsDeriver {
     }
 
     fn derive(&self, batch: &mut detamu_core::ObservationBatch) -> Result<(), DerivationError> {
-        if !batch
-            .provenance
-            .iter()
-            .any(|provenance| provenance.observer == "lsp.rust-analyzer")
-        {
+        let languages = semantic_languages(batch);
+        if languages.is_empty() {
             return Ok(());
         }
         let mut degrees = HashMap::<EntityId, (u32, u32)>::with_capacity(batch.relations.len());
@@ -178,13 +175,14 @@ impl ObservationDeriver for GraphMetricsDeriver {
             to.0 = to.0.saturating_add(1);
         }
         for observation in &mut batch.entities {
+            let covered = observation
+                .attributes
+                .get("language")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|language| languages.contains(language));
             if observation.entity.model.as_str() != CODE_MODEL_ID
                 || observation.entity.kind == NodeKind::File.as_str()
-                || observation
-                    .attributes
-                    .get("language")
-                    .and_then(serde_json::Value::as_str)
-                    != Some("rust")
+                || !covered
             {
                 continue;
             }
@@ -611,7 +609,7 @@ pub fn file_imports_module(
             from,
             to,
         },
-        weight: 1.0,
+        weight: DependencyType::Imports.weight(),
         attributes: Attributes::new(),
     }
 }
@@ -704,6 +702,21 @@ impl DependencyType {
             Self::Other(value) => format!("other:{value}"),
         }
     }
+
+    /// ACC `depends` weight for this relationship.
+    ///
+    /// Inherits and implements are 1.0, calls 0.7, imports 0.5, references 0.3.
+    /// Anything else, including an unrecognized kind, is 0.5. Containment stays
+    /// at 1.0 because it is structural and is not a dependency edge.
+    #[must_use]
+    pub fn weight(&self) -> f64 {
+        match self {
+            Self::Inherits | Self::Implements | Self::Contains => 1.0,
+            Self::Calls => 0.7,
+            Self::Imports | Self::Other(_) => 0.5,
+            Self::References => 0.3,
+        }
+    }
 }
 
 pub fn symbol_observation(
@@ -742,7 +755,6 @@ pub fn dependency_observation(
     from: &SymbolId,
     to: &SymbolId,
     relationship: &DependencyType,
-    weight: f64,
 ) -> RelationObservation {
     let kind = relationship.as_str();
     RelationObservation {
@@ -754,9 +766,28 @@ pub fn dependency_observation(
             from: EntityId::new(from.as_str()),
             to: EntityId::new(to.as_str()),
         },
-        weight,
+        weight: relationship.weight(),
         attributes: Attributes::new(),
     }
+}
+
+fn semantic_languages(batch: &detamu_core::ObservationBatch) -> std::collections::BTreeSet<String> {
+    let mut languages = std::collections::BTreeSet::new();
+    for provenance in &batch.provenance {
+        if !provenance.observer.starts_with("lsp.") {
+            continue;
+        }
+        if let Some(language) = provenance
+            .source
+            .as_deref()
+            .filter(|language| !language.is_empty())
+        {
+            languages.insert(language.to_owned());
+        } else if provenance.observer == "lsp.rust-analyzer" {
+            languages.insert("rust".to_owned());
+        }
+    }
+    languages
 }
 
 fn measurement(name: &str, value: u32) -> Measurement {
@@ -874,7 +905,6 @@ mod graph_tests {
             &source_id,
             &target_id,
             &DependencyType::Calls,
-            1.0,
         ));
         batch.provenance.push(ObserverProvenance {
             observer: "lsp.rust-analyzer".to_owned(),
@@ -895,5 +925,46 @@ mod graph_tests {
             exact_u32(&batch.entities[1].measurements, "graph.incoming_edges"),
             Some(1)
         );
+        assert_eq!(batch.relations[0].weight, DependencyType::Calls.weight());
+    }
+
+    #[test]
+    fn graph_degrees_follow_the_language_a_semantic_server_covered() {
+        let revision = RevisionId::new(RepositoryId::new("fixture"), GitOid::new("abc"));
+        let mut batch = detamu_core::ObservationBatch::empty(revision.snapshot());
+        let mut python = symbol(&revision, "parse", 1);
+        python
+            .attributes
+            .insert("language".to_owned(), json!("python"));
+        batch.entities.push(python);
+        batch.provenance.push(ObserverProvenance {
+            observer: "lsp.registered".to_owned(),
+            version: "1".to_owned(),
+            configuration_digest: Some("python".to_owned()),
+            source: Some("python".to_owned()),
+        });
+
+        GraphMetricsDeriver
+            .derive(&mut batch)
+            .expect("derive python graph metrics");
+
+        assert_eq!(
+            exact_u32(&batch.entities[0].measurements, "graph.incoming_edges"),
+            Some(0)
+        );
+        assert_eq!(
+            exact_u32(&batch.entities[0].measurements, "graph.outgoing_edges"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn dependency_weights_follow_the_acc_table() {
+        assert_eq!(DependencyType::Inherits.weight(), 1.0);
+        assert_eq!(DependencyType::Implements.weight(), 1.0);
+        assert_eq!(DependencyType::Calls.weight(), 0.7);
+        assert_eq!(DependencyType::Imports.weight(), 0.5);
+        assert_eq!(DependencyType::References.weight(), 0.3);
+        assert_eq!(DependencyType::Other("uses".to_owned()).weight(), 0.5);
     }
 }
